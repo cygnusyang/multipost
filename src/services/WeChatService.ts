@@ -68,6 +68,27 @@ export class WeChatService implements IWeChatService {
     if (stored) {
       try {
         this.authInfo = JSON.parse(stored);
+        // Backward compatibility: convert old string[] cookies to new CookieParam[] format
+        if (this.authInfo && this.authInfo.cookies.length > 0 && typeof this.authInfo.cookies[0] === 'string') {
+          this.log('Converting old cookie format (string[]) to new format (CookieParam[])', 'info');
+          const oneYearFromNow = Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60;
+          this.authInfo.cookies = (this.authInfo.cookies as unknown as string[]).map(cookieStr => {
+            const [name, value] = cookieStr.split('=', 2);
+            return {
+              name,
+              value,
+              domain: '.mp.weixin.qq.com',
+              path: '/',
+              expires: oneYearFromNow,
+              httpOnly: false,
+              secure: true,
+              sameSite: 'Lax' as const,
+            };
+          }).filter(cookie => !!cookie.name && cookie.value !== undefined);
+          // Save the converted format
+          await this.saveAuthInfo(this.authInfo);
+          this.log(`Converted ${this.authInfo.cookies.length} cookies to new format`, 'info');
+        }
         this.log(`Auth loaded successfully for user: ${this.authInfo?.nickName || 'unknown'}`);
       } catch (e) {
         this.log('Failed to parse stored auth data', 'error');
