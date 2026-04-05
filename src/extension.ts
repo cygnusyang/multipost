@@ -165,65 +165,7 @@ export async function activate(context: vscode.ExtensionContext) {
             cancellable: false,
           },
           async (progress) => {
-            try {
-              const authInfo = weChatService.getAuthInfo();
-
-              // If we have saved cookies but no active CDP session, start authenticated session
-              if (authInfo && authInfo.cookies && authInfo.cookies.length > 0) {
-                log(`Found saved auth (${authInfo.cookies.length} cookies), starting authenticated CDP session`);
-                progress.report({ message: 'Starting Chrome with saved authentication...' });
-                await chromeCdpService.startAuthenticatedSession(authInfo.cookies);
-              } else if (!chromeCdpService.isSessionActive()) {
-                // No auth and no active session - need to do first-time login
-                log('No saved authentication, starting first-time login flow');
-                progress.report({ message: 'Waiting for QR code scan...' });
-                const cookies = await chromeCdpService.startFirstTimeLogin();
-                log(`Got ${cookies.length} cookies from Chrome CDP login`);
-
-                // Validate and save cookies
-                const result = await weChatService.checkAuthWithCookies(cookies);
-                if (!result.isAuthenticated || !result.authInfo) {
-                  vscode.window.showErrorMessage('Login failed. Please try again.');
-                  log('Login failed', 'error');
-                  return;
-                }
-
-                log(`User authenticated: ${result.authInfo.nickName}`);
-                updatePreviewAuthStatus();
-              } else {
-                // Already have an active CDP session - reuse it
-                log('Reusing existing active CDP session (already authenticated)');
-              }
-
-              // Now we have an active authenticated CDP session - process and upload
-              progress.report({ message: 'Processing markdown...' });
-              log('Starting markdown processing...');
-              const processMarkdownModule = await import('./utils/processMarkdown');
-              const { processMarkdownForUpload } = processMarkdownModule;
-              const { html, errors } = await processMarkdownForUpload(markdown, weChatService);
-              if (errors.length > 0) {
-                vscode.window.showWarningMessage(`Processing completed with ${errors.length} errors: ${errors[0]}`);
-                log(`Warnings during processing: ${errors.length} errors`, 'warn');
-                errors.forEach(err => log(`  - ${err}`, 'warn'));
-              }
-
-              const currentAuthInfo = weChatService.getAuthInfo();
-              const author = settingsService.getDefaultAuthor() || (currentAuthInfo?.nickName) || '';
-              const digest = html.replace(/<[^>]*>/g, '').slice(0, 120);
-              log(`Processing complete: HTML length = ${html.length} characters, author = "${author}"`);
-
-              // Create draft directly in browser via CDP automation
-              progress.report({ message: 'Creating draft in Chrome...' });
-              const draftUrl = await chromeCdpService.createDraftInBrowser(title, author, html, digest);
-              vscode.window.showInformationMessage('Draft created successfully in Chrome via CDP!');
-              log(`Draft created successfully via CDP: ${draftUrl}`);
-            } catch (error) {
-              vscode.window.showErrorMessage(`CDP upload failed: ${(error as Error).message}`);
-              log(`Unexpected error during CDP upload: ${(error as Error).message}`, 'error');
-              if (error instanceof Error && error.stack) {
-                log(`Stack trace: ${error.stack}`, 'error');
-              }
-            }
+            await handleCdpFullAutomatedUpload(markdown, title, progress);
           }
         );
       }
@@ -367,6 +309,119 @@ export async function activate(context: vscode.ExtensionContext) {
 function updatePreviewAuthStatus(): void {
   const authInfo = weChatService.getAuthInfo();
   previewService.updateAuthStatus(!!authInfo, authInfo?.nickName);
+}
+
+/**
+ * Ensure we have an active authenticated CDP session
+ * - If saved cookies exist: start authenticated session
+ * - If no saved cookies: do first-time login flow
+ * - If already active: reuse existing session
+ * @returns true if session is ready, false if login failed
+ */
+async function ensureCdpAuthenticatedSession(
+  progress: vscode.Progress<{ message?: string }>
+): Promise<boolean> {
+  const authInfo = weChatService.getAuthInfo();
+
+  try {
+    // If we have saved cookies but no active CDP session, start authenticated session
+    if (authInfo && authInfo.cookies && authInfo.cookies.length > 0) {
+      log(`Found saved auth (${authInfo.cookies.length} cookies), starting authenticated CDP session`);
+      progress.report({ message: 'Starting Chrome with saved authentication...' });
+      await chromeCdpService.startAuthenticatedSession(authInfo.cookies);
+      return true;
+    }
+
+    // No auth and no active session - need to do first-time login
+    if (!chromeCdpService.isSessionActive()) {
+      log('No saved authentication, starting first-time login flow');
+      progress.report({ message: 'Waiting for QR code scan...' });
+      const cookies = await chromeCdpService.startFirstTimeLogin();
+      log(`Got ${cookies.length} cookies from Chrome CDP login`);
+
+      // Validate and save cookies
+      const result = await weChatService.checkAuthWithCookies(cookies);
+      if (!result.isAuthenticated || !result.authInfo) {
+        vscode.window.showErrorMessage('Login failed. Please try again.');
+        log('Login failed', 'error');
+        return false;
+      }
+
+      log(`User authenticated: ${result.authInfo.nickName}`);
+      updatePreviewAuthStatus();
+      return true;
+    }
+
+    // Already have an active CDP session - reuse it
+    log('Reusing existing active CDP session (already authenticated)');
+    return true;
+  } catch (error) {
+    // Let caller handle the error
+    throw error;
+  }
+}
+
+/**
+ * Process markdown content and get HTML ready for upload
+ * Handles mermaid diagram rendering and image uploading
+ */
+async function processMarkdownContent(
+  markdown: string
+): Promise<{ html: string; errors: string[] }> {
+  log('Starting markdown processing...');
+  const processMarkdownModule = await import('./utils/processMarkdown');
+  const { processMarkdownForUpload } = processMarkdownModule;
+  const result = await processMarkdownForUpload(markdown, weChatService);
+
+  if (result.errors.length > 0) {
+    vscode.window.showWarningMessage(`Processing completed with ${result.errors.length} errors: ${result.errors[0]}`);
+    log(`Warnings during processing: ${result.errors.length} errors`, 'warn');
+    result.errors.forEach(err => log(`  - ${err}`, 'warn'));
+  }
+
+  return result;
+}
+
+/**
+ * Handle fully automated CDP upload workflow:
+ * - Ensure authenticated (login if needed)
+ * - Process markdown (upload images, render mermaid)
+ * - Create draft in browser via CDP automation
+ */
+async function handleCdpFullAutomatedUpload(
+  markdown: string,
+  title: string,
+  progress: vscode.Progress<{ message?: string }>
+): Promise<void> {
+  try {
+    // Step 1: Ensure we have an authenticated CDP session
+    const sessionReady = await ensureCdpAuthenticatedSession(progress);
+    if (!sessionReady) {
+      return;
+    }
+
+    // Step 2: Process markdown (render mermaid, upload images)
+    progress.report({ message: 'Processing markdown...' });
+    const { html } = await processMarkdownContent(markdown);
+
+    // Step 3: Prepare metadata and create draft in browser
+    const currentAuthInfo = weChatService.getAuthInfo();
+    const author = settingsService.getDefaultAuthor() || (currentAuthInfo?.nickName) || '';
+    const digest = html.replace(/<[^>]*>/g, '').slice(0, 120);
+    log(`Processing complete: HTML length = ${html.length} characters, author = "${author}"`);
+
+    // Create draft directly in browser via CDP automation
+    progress.report({ message: 'Creating draft in Chrome...' });
+    const draftUrl = await chromeCdpService.createDraftInBrowser(title, author, html, digest);
+    vscode.window.showInformationMessage('Draft created successfully in Chrome via CDP!');
+    log(`Draft created successfully via CDP: ${draftUrl}`);
+  } catch (error) {
+    vscode.window.showErrorMessage(`CDP upload failed: ${(error as Error).message}`);
+    log(`Unexpected error during CDP upload: ${(error as Error).message}`, 'error');
+    if (error instanceof Error && error.stack) {
+      log(`Stack trace: ${error.stack}`, 'error');
+    }
+  }
 }
 
 export function deactivate() {}
