@@ -46,7 +46,7 @@ jest.mock('vscode', () => {
 });
 
 import * as vscode from 'vscode';
-import { activate, deactivate } from './extension';
+import { activate, deactivate } from '../../extension';
 
 describe('extension', () => {
   let mockContext: vscode.ExtensionContext;

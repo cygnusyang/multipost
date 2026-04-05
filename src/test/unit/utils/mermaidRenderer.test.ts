@@ -1,4 +1,4 @@
-import { renderMermaidToBuffer } from './mermaidRenderer';
+import { renderMermaidToBuffer } from '../../utils/mermaidRenderer';
 
 // Mock canvas to avoid canvas rendering in tests
 jest.mock('canvas', () => ({

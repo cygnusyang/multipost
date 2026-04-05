@@ -1,6 +1,6 @@
-import { processMarkdownForUpload } from './processMarkdown';
-import { WeChatService } from '../services/WeChatService';
-import { renderMermaidToBuffer } from './mermaidRenderer';
+import { processMarkdownForUpload } from '../../utils/processMarkdown';
+import { WeChatService } from '../../services/WeChatService';
+import { renderMermaidToBuffer } from '../../utils/mermaidRenderer';
 
 // Mock all the unified/remark dependencies since they are ES modules
 // and cause issues with Jest

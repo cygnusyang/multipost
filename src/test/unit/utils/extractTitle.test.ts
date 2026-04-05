@@ -1,4 +1,4 @@
-import { extractTitle } from './extractTitle';
+import { extractTitle } from '../../utils/extractTitle';
 
 describe('extractTitle', () => {
   it('should extract title from first H1 heading', () => {

@@ -1,4 +1,4 @@
-import { PreviewService } from './PreviewService';
+import { PreviewService } from 'src/services/PreviewService';
 import * as vscode from 'vscode';
 
 describe('PreviewService', () => {

@@ -80,7 +80,7 @@ async function activate(context) {
         previewService.setMessageHandler(async (message) => {
             log(`Received message from preview webview: ${message.type}`);
             if (message.type === 'uploadToWeChat') {
-                await vscode.commands.executeCommand('wechat-publisher.uploadToWeChat');
+                await vscode.commands.executeCommand('multipost.uploadToWeChat');
             }
             else if (message.type === 'copyHtml') {
                 await vscode.env.clipboard.writeText(message.html);
@@ -91,8 +91,8 @@ async function activate(context) {
         log('Step 2: Registering commands...');
         log(`Available vscode.commands: ${typeof vscode.commands}`);
         // Register commands
-        let disposable = vscode.commands.registerCommand('wechat-publisher.preview', () => {
-            log('Command invoked: wechat-publisher.preview');
+        let disposable = vscode.commands.registerCommand('multipost.preview', () => {
+            log('Command invoked: multipost.preview');
             const editor = vscode.window.activeTextEditor;
             if (!editor) {
                 vscode.window.showErrorMessage('No active editor');
@@ -106,18 +106,18 @@ async function activate(context) {
             log('Preview opened successfully');
         });
         context.subscriptions.push(disposable);
-        log(`Command registered: wechat-publisher.preview, disposable: ${!!disposable}`);
-        disposable = vscode.commands.registerCommand('wechat-publisher.logoutWeChat', async () => {
-            log('Command invoked: wechat-publisher.logoutWeChat');
+        log(`Command registered: multipost.preview, disposable: ${!!disposable}`);
+        disposable = vscode.commands.registerCommand('multipost.logoutWeChat', async () => {
+            log('Command invoked: multipost.logoutWeChat');
             weChatService.clearAuth();
-            vscode.window.showInformationMessage('Logged out from WeChat');
+            vscode.window.showInformationMessage('Logged out from MultiPost');
             updatePreviewAuthStatus();
             log('User logged out successfully');
         });
         context.subscriptions.push(disposable);
-        log('Command registered: wechat-publisher.logoutWeChat');
-        disposable = vscode.commands.registerCommand('wechat-publisher.inputCookieWeChat', async () => {
-            log('Command invoked: wechat-publisher.inputCookieWeChat');
+        log('Command registered: multipost.logoutWeChat');
+        disposable = vscode.commands.registerCommand('multipost.inputCookieWeChat', async () => {
+            log('Command invoked: multipost.inputCookieWeChat');
             const cookieInput = await vscode.window.showInputBox({
                 prompt: 'Paste your cookie from browser (after logging into mp.weixin.qq.com)',
                 placeHolder: 'cookie1=value1; cookie2=value2; ...',
@@ -151,63 +151,65 @@ async function activate(context) {
             }
         });
         context.subscriptions.push(disposable);
-        log('Command registered: wechat-publisher.inputCookieWeChat');
-        // Chrome CDP Automated Login
-        disposable = vscode.commands.registerCommand('wechat-publisher.loginWeChatChromeCdp', async () => {
-            log('Command invoked: wechat-publisher.loginWeChatChromeCdp');
-            await vscode.window.withProgress({
-                location: vscode.ProgressLocation.Notification,
-                title: 'Starting Chrome for automated login...',
-                cancellable: false,
-            }, async () => {
-                try {
-                    log('Starting Chrome CDP automated login');
-                    const cookies = await chromeCdpService.startFirstTimeLogin();
-                    log(`Got ${cookies.length} cookies from Chrome CDP login`);
-                    // Validate cookies with existing WeChatService method
-                    const result = await weChatService.checkAuthWithCookies(cookies);
-                    if (result.isAuthenticated && result.authInfo) {
-                        vscode.window.showInformationMessage(`Automated login successful as ${result.authInfo.nickName || 'user'}`);
-                        log(`Chrome CDP login successful for user: ${result.authInfo.nickName}`);
-                        updatePreviewAuthStatus();
-                    }
-                    else {
-                        vscode.window.showErrorMessage('Automated login failed. Please try Manual Cookie Input.');
-                        log('Chrome CDP login authentication check failed', 'error');
-                    }
-                }
-                catch (error) {
-                    const errorMsg = error instanceof Error ? error.message : String(error);
-                    vscode.window.showErrorMessage(`Chrome CDP login failed: ${errorMsg}`);
-                    log(`Chrome CDP login error: ${errorMsg}`, 'error');
-                }
-            });
-        });
-        context.subscriptions.push(disposable);
-        log('Command registered: wechat-publisher.loginWeChatChromeCdp');
-        disposable = vscode.commands.registerCommand('wechat-publisher.uploadToWeChat', async () => {
-            log('Command invoked: wechat-publisher.uploadToWeChat');
+        log('Command registered: multipost.inputCookieWeChat');
+        // Chrome CDP Fully Automated Upload - login if needed then upload current file
+        disposable = vscode.commands.registerCommand('multipost.loginWeChatChromeCdp', async () => {
+            log('Command invoked: multipost.loginWeChatChromeCdp (Fully Automated CDP Upload)');
             const editor = vscode.window.activeTextEditor;
             if (!editor) {
                 vscode.window.showErrorMessage('No active editor');
                 log('Error: No active editor', 'error');
                 return;
             }
-            const authInfo = weChatService.getAuthInfo();
-            if (!authInfo) {
-                vscode.window.showErrorMessage('Not logged in. Please login first.');
-                log('Error: Not authenticated, prompting login', 'error');
-                await vscode.commands.executeCommand('wechat-publisher.loginWeChatChromeCdp');
+            const markdown = editor.document.getText();
+            const fileName = editor.document.fileName;
+            const title = (0, extractTitle_1.extractTitle)(markdown) || fileName.split('/').pop()?.replace(/\.md$/, '') || 'Untitled';
+            log(`Extracted title: "${title}", markdown length: ${markdown.length} characters`);
+            await vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: 'Starting Chrome CDP automated upload...',
+                cancellable: false,
+            }, async (progress) => {
+                await handleCdpFullAutomatedUpload(markdown, title, progress);
+            });
+        });
+        context.subscriptions.push(disposable);
+        log('Command registered: multipost.loginWeChatChromeCdp (Fully Automated CDP Upload)');
+        disposable = vscode.commands.registerCommand('multipost.uploadToWeChat', async () => {
+            log('Command invoked: multipost.uploadToWeChat');
+            const editor = vscode.window.activeTextEditor;
+            if (!editor) {
+                vscode.window.showErrorMessage('No active editor');
+                log('Error: No active editor', 'error');
                 return;
             }
-            log(`User authenticated: ${authInfo.nickName}`);
-            // Check auth is still valid
-            log('Checking if authentication is still valid...');
-            const authCheck = await weChatService.checkAuth();
-            if (!authCheck.isAuthenticated) {
-                vscode.window.showErrorMessage('Authentication expired. Please login again.');
-                log('Error: Authentication expired', 'error');
-                return;
+            let authInfo = weChatService.getAuthInfo();
+            // If not authenticated, we need to do a login first
+            if (!authInfo) {
+                log('Not authenticated, starting automatic CDP login before upload');
+                vscode.window.showInformationMessage('Starting Chrome for login...');
+                // Run the login flow
+                const cookies = await chromeCdpService.startFirstTimeLogin();
+                const result = await weChatService.checkAuthWithCookies(cookies);
+                if (!result.isAuthenticated || !result.authInfo) {
+                    vscode.window.showErrorMessage('Login failed. Please try again.');
+                    log('Login failed', 'error');
+                    return;
+                }
+                authInfo = result.authInfo;
+                log(`User authenticated: ${authInfo.nickName}`);
+                updatePreviewAuthStatus();
+            }
+            else {
+                log(`User authenticated: ${authInfo.nickName}`);
+                // Check auth is still valid
+                log('Checking if authentication is still valid...');
+                const authCheck = await weChatService.checkAuth();
+                if (!authCheck.isAuthenticated) {
+                    vscode.window.showErrorMessage('Authentication expired. Please login again.');
+                    log('Error: Authentication expired', 'error');
+                    return;
+                }
             }
             const markdown = editor.document.getText();
             const fileName = editor.document.fileName;
@@ -231,15 +233,30 @@ async function activate(context) {
                     const author = settingsService.getDefaultAuthor() || authInfo.nickName || '';
                     const digest = html.replace(/<[^>]*>/g, '').slice(0, 120);
                     log(`Processing complete: HTML length = ${html.length} characters, author = "${author}"`);
-                    // Check if we already have an active CDP session
-                    if (!chromeCdpService.isSessionActive()) {
-                        log('Starting new authenticated CDP session with saved cookies');
-                        await chromeCdpService.startAuthenticatedSession(authInfo.cookies);
+                    // If we have an active CDP session (Chrome is open), use browser automation to create draft
+                    // Otherwise, fall back to API upload for manual cookie login users
+                    if (chromeCdpService.isSessionActive()) {
+                        // CDP mode - create draft directly in browser via automation
+                        const draftUrl = await chromeCdpService.createDraftInBrowser(title, author, html, digest);
+                        vscode.window.showInformationMessage('Draft created successfully in Chrome!');
+                        log(`Draft created successfully: ${draftUrl}`);
                     }
-                    // Create draft directly in browser via CDP automation
-                    const draftUrl = await chromeCdpService.createDraftInBrowser(title, author, html, digest);
-                    vscode.window.showInformationMessage('Draft created successfully in Chrome!');
-                    log(`Draft created successfully: ${draftUrl}`);
+                    else {
+                        // Manual mode - use API upload (original behavior)
+                        const result = await weChatService.createDraft(title, author, html, digest);
+                        if (result.success && result.draftUrl) {
+                            vscode.window.showInformationMessage('Draft created successfully!');
+                            log(`Draft created successfully: ${result.draftUrl}`);
+                            if (settingsService.shouldAutoOpenDraft()) {
+                                await vscode.env.openExternal(vscode.Uri.parse(result.draftUrl));
+                                log('Opening draft in browser');
+                            }
+                        }
+                        else {
+                            vscode.window.showErrorMessage(`Upload failed: ${result.error}`);
+                            log(`Upload failed: ${result.error}`, 'error');
+                        }
+                    }
                 }
                 catch (error) {
                     vscode.window.showErrorMessage(`Upload failed: ${error.message}`);
@@ -251,7 +268,7 @@ async function activate(context) {
             });
         });
         context.subscriptions.push(disposable);
-        log('Command registered: wechat-publisher.uploadToWeChat');
+        log('Command registered: multipost.uploadToWeChat');
         log('All commands registered successfully');
         log('Step 3: Loading saved authentication from storage in background...');
         void weChatService.loadAuthFromStorage().then(() => {
@@ -277,6 +294,100 @@ async function activate(context) {
 function updatePreviewAuthStatus() {
     const authInfo = weChatService.getAuthInfo();
     previewService.updateAuthStatus(!!authInfo, authInfo?.nickName);
+}
+/**
+ * Ensure we have an active authenticated CDP session
+ * - If saved cookies exist: start authenticated session
+ * - If no saved cookies: do first-time login flow
+ * - If already active: reuse existing session
+ * @returns true if session is ready, false if login failed
+ */
+async function ensureCdpAuthenticatedSession(progress) {
+    const authInfo = weChatService.getAuthInfo();
+    try {
+        // If we have saved cookies but no active CDP session, start authenticated session
+        if (authInfo && authInfo.cookies && authInfo.cookies.length > 0) {
+            log(`Found saved auth (${authInfo.cookies.length} cookies), starting authenticated CDP session`);
+            progress.report({ message: 'Starting Chrome with saved authentication...' });
+            await chromeCdpService.startAuthenticatedSession(authInfo.cookies);
+            return true;
+        }
+        // No auth and no active session - need to do first-time login
+        if (!chromeCdpService.isSessionActive()) {
+            log('No saved authentication, starting first-time login flow');
+            progress.report({ message: 'Waiting for QR code scan...' });
+            const cookies = await chromeCdpService.startFirstTimeLogin();
+            log(`Got ${cookies.length} cookies from Chrome CDP login`);
+            // Validate and save cookies
+            const result = await weChatService.checkAuthWithCookies(cookies);
+            if (!result.isAuthenticated || !result.authInfo) {
+                vscode.window.showErrorMessage('Login failed. Please try again.');
+                log('Login failed', 'error');
+                return false;
+            }
+            log(`User authenticated: ${result.authInfo.nickName}`);
+            updatePreviewAuthStatus();
+            return true;
+        }
+        // Already have an active CDP session - reuse it
+        log('Reusing existing active CDP session (already authenticated)');
+        return true;
+    }
+    catch (error) {
+        // Let caller handle the error
+        throw error;
+    }
+}
+/**
+ * Process markdown content and get HTML ready for upload
+ * Handles mermaid diagram rendering and image uploading
+ */
+async function processMarkdownContent(markdown) {
+    log('Starting markdown processing...');
+    const processMarkdownModule = await Promise.resolve().then(() => __importStar(require('./utils/processMarkdown')));
+    const { processMarkdownForUpload } = processMarkdownModule;
+    const result = await processMarkdownForUpload(markdown, weChatService);
+    if (result.errors.length > 0) {
+        vscode.window.showWarningMessage(`Processing completed with ${result.errors.length} errors: ${result.errors[0]}`);
+        log(`Warnings during processing: ${result.errors.length} errors`, 'warn');
+        result.errors.forEach(err => log(`  - ${err}`, 'warn'));
+    }
+    return result;
+}
+/**
+ * Handle fully automated CDP upload workflow:
+ * - Ensure authenticated (login if needed)
+ * - Process markdown (upload images, render mermaid)
+ * - Create draft in browser via CDP automation
+ */
+async function handleCdpFullAutomatedUpload(markdown, title, progress) {
+    try {
+        // Step 1: Ensure we have an authenticated CDP session
+        const sessionReady = await ensureCdpAuthenticatedSession(progress);
+        if (!sessionReady) {
+            return;
+        }
+        // Step 2: Process markdown (render mermaid, upload images)
+        progress.report({ message: 'Processing markdown...' });
+        const { html } = await processMarkdownContent(markdown);
+        // Step 3: Prepare metadata and create draft in browser
+        const currentAuthInfo = weChatService.getAuthInfo();
+        const author = settingsService.getDefaultAuthor() || (currentAuthInfo?.nickName) || '';
+        const digest = html.replace(/<[^>]*>/g, '').slice(0, 120);
+        log(`Processing complete: HTML length = ${html.length} characters, author = "${author}"`);
+        // Create draft directly in browser via CDP automation
+        progress.report({ message: 'Creating draft in Chrome...' });
+        const draftUrl = await chromeCdpService.createDraftInBrowser(title, author, html, digest);
+        vscode.window.showInformationMessage('Draft created successfully in Chrome via CDP!');
+        log(`Draft created successfully via CDP: ${draftUrl}`);
+    }
+    catch (error) {
+        vscode.window.showErrorMessage(`CDP upload failed: ${error.message}`);
+        log(`Unexpected error during CDP upload: ${error.message}`, 'error');
+        if (error instanceof Error && error.stack) {
+            log(`Stack trace: ${error.stack}`, 'error');
+        }
+    }
 }
 function deactivate() { }
 //# sourceMappingURL=extension.js.map

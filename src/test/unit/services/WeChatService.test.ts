@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { WeChatService } from './WeChatService';
-import { WeChatAuthInfo } from '../interfaces/IWeChatService';
+import { WeChatService } from '../../services/WeChatService';
+import { WeChatAuthInfo } from '../../interfaces/IWeChatService';
 
 // Mock external dependencies
 jest.mock('node-fetch', () => ({

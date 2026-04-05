@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { SettingsService } from './SettingsService';
+import { SettingsService } from '../../services/SettingsService';
 
 // Mock vscode workspace
 jest.mock('vscode', () => ({

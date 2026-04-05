@@ -1,7 +1,11 @@
 module.exports = {
   preset: 'ts-jest/presets/js-with-ts',
   testEnvironment: 'node',
-  roots: ['<rootDir>/src'],
+  roots: ['<rootDir>/src', '<rootDir>/src/test'],
+  testMatch: [
+    '<rootDir>/src/test/unit/**/*.test.ts',
+    '<rootDir>/src/test/unit/**/*.test.js',
+  ],
   // Mock all external dependencies that need it
   moduleNameMapper: {
     '^vscode$': '<rootDir>/src/test/__mocks__/vscode.ts',
@@ -9,6 +13,7 @@ module.exports = {
     '^form-data$': '<rootDir>/src/test/__mocks__/form-data.ts',
     '^jsdom$': '<rootDir>/src/test/__mocks__/jsdom.ts',
     '^mermaid$': '<rootDir>/src/test/__mocks__/mermaid.ts',
+    '^src/(.*)$': '<rootDir>/src/$1',
   },
   // Only ignore node_modules that don't need transpilation - all the remark/unified ecosystem is ESM
   transformIgnorePatterns: [
@@ -19,6 +24,7 @@ module.exports = {
     'src/**/*.ts',
     '!src/**/*.d.ts',
     '!src/test/**/*.ts',
+    '!src/**/*.test.ts',
     '!webview-src/**/*.ts',
   ],
   coverageThreshold: {
