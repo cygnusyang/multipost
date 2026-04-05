@@ -121,6 +121,8 @@ export class ChromeCDPService {
     }
 
     // Parse cookie strings into Puppeteer CookieParam objects
+    // expires: set to 1 year from now to keep the cookie valid for a long time
+    const oneYearFromNow = Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60;
     const cookies: CookieParam[] = cookieStrings.map(cookieStr => {
       const [name, value] = cookieStr.split('=', 2);
       return {
@@ -128,6 +130,9 @@ export class ChromeCDPService {
         value,
         domain: '.mp.weixin.qq.com',
         path: '/',
+        expires: oneYearFromNow,
+        httpOnly: false,
+        secure: true,
       };
     });
 
