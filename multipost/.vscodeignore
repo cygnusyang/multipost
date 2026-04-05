@@ -1,0 +1,14 @@
+out/**/*.map
+node_modules/**
+!.node_modules/canvas/build/Release/**
+webview-src/**
+!media/webview/**
+.vscode/**
+**/*.ts
+**/*.tsx
+.git
+.gitignore
+*.log
+yarn.lock
+package-lock.json
+pnpm-lock.yaml

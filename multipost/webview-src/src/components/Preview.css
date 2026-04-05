@@ -1,0 +1,12 @@
+.preview-container {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+}
+
+.preview-iframe {
+  width: 100%;
+  min-height: 100%;
+  border: none;
+  background-color: white;
+}
