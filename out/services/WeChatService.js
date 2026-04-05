@@ -130,18 +130,27 @@ class WeChatService {
             const html = await response.text();
             this.log(`Response HTML length: ${html.length} characters`);
             // Extract tokens using regex from HTML
-            const tokenMatch = html.match(/data:\s*\{[\s\S]*?t:\s*["']([^"']+)["']/);
+            // Try multiple patterns to handle different page structures (more robust)
+            let tokenMatch = html.match(/token\s*[=:]\s*["']([^"']+)["']/);
+            if (!tokenMatch) {
+                tokenMatch = html.match(/t:\s*["']([^"']+)["']/);
+            }
+            // More specific: look for token inside script assignment
+            if (!tokenMatch) {
+                tokenMatch = html.match(/window\.[^=]*=\s*\{[^}]*token["']?\s*:\s*["']([^"']+)["']/);
+            }
             if (!tokenMatch) {
                 this.log('Failed to extract token from HTML', 'error');
-                this.log('HTML preview (first 500 chars):' + html.substring(0, 500), 'error');
+                this.log('HTML preview (first 1000 chars):' + html.substring(0, 1000), 'error');
                 return { isAuthenticated: false };
             }
             this.log(`Token found: ${tokenMatch[1]}`);
-            const ticketMatch = html.match(/ticket:\s*["']([^"']+)["']/);
-            const userNameMatch = html.match(/user_name:\s*["']([^"']+)["']/);
-            const nickNameMatch = html.match(/nick_name:\s*["']([^"']+)["']/);
-            const timeMatch = html.match(/time:\s*["'](\d+)["']/);
-            const avatarMatch = html.match(/head_img:\s*['"]([^'"]+)['"]/);
+            // Try multiple patterns for other fields (more robust)
+            const ticketMatch = html.match(/ticket\s*[=:]\s*["']([^"']+)["']/) || html.match(/ticket:\s*["']([^"']+)["']/);
+            const userNameMatch = html.match(/user_name\s*[=:]\s*["']([^"']+)["']/) || html.match(/user_name:\s*["']([^"']+)["']/);
+            const nickNameMatch = html.match(/nick_name\s*[=:]\s*["']([^"']+)["']/) || html.match(/nick_name:\s*["']([^"']+)["']/);
+            const timeMatch = html.match(/time\s*[=:]\s*["']?(\d+)["']?/) || html.match(/time:\s*["'](\d+)["']/);
+            const avatarMatch = html.match(/head_img\s*[=:]\s*["']([^"']+)["']/) || html.match(/head_img:\s*['"]([^'"]+)['"]/);
             const cookies = response.headers.raw()['set-cookie'] || [];
             this.log(`Cookies received: ${cookies.length} cookies`);
             const newAuthInfo = {
