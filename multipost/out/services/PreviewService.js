@@ -35,9 +35,12 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.PreviewService = void 0;
 const vscode = __importStar(require("vscode"));
+const fs = __importStar(require("fs"));
+const path = __importStar(require("path"));
 class PreviewService {
     constructor(extensionUri) {
         this.extensionUri = extensionUri;
+        this.findAssetFiles();
     }
     openPreview(markdown) {
         if (this.panel) {
@@ -77,10 +80,18 @@ class PreviewService {
     getPanel() {
         return this.panel;
     }
+    findAssetFiles() {
+        const assetsPath = path.join(this.extensionUri.fsPath, 'media', 'webview', 'assets');
+        if (fs.existsSync(assetsPath)) {
+            const files = fs.readdirSync(assetsPath);
+            this.jsFileName = files.find(f => f.startsWith('main-') && f.endsWith('.js'));
+            this.cssFileName = files.find(f => f.startsWith('main-') && f.endsWith('.css'));
+        }
+    }
     getWebviewContent() {
         const webview = this.panel.webview;
-        const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'webview', 'assets', 'main-*.js'));
-        const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'webview', 'assets', 'main-*.css'));
+        const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'webview', 'assets', this.jsFileName || 'main.js'));
+        const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'webview', 'assets', this.cssFileName || 'main.css'));
         return `<!DOCTYPE html>
 <html lang="zh-CN">
   <head>
