@@ -2,7 +2,7 @@
   "name": "multipost",
   "displayName": "MultiPost - WeChat Publisher",
   "description": "Publish Markdown directly to WeChat Official Accounts from VSCode",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "cygnus",
   "icon": "media/icon.png",
   "repository": {
@@ -54,20 +54,16 @@
         }
       },
       {
-        "command": "wechat-publisher.loginWeChat",
-        "title": "Login WeChat Official Accounts"
-      },
-      {
-        "command": "wechat-publisher.logoutWeChat",
-        "title": "Logout WeChat Official Accounts"
+        "command": "wechat-publisher.loginWeChatChromeCdp",
+        "title": "Login WeChat (Fully Automated with Chrome)"
       },
       {
         "command": "wechat-publisher.inputCookieWeChat",
-        "title": "Input Cookie for WeChat Official Accounts (Manual Login)"
+        "title": "Input Cookie (Manual Login)"
       },
       {
-        "command": "wechat-publisher.loginWeChatChromeCdp",
-        "title": "Login WeChat via Chrome CDP (Fully Automated)"
+        "command": "wechat-publisher.logoutWeChat",
+        "title": "Logout WeChat"
       }
     ]
   },

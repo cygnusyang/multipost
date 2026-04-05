@@ -1,5 +1,12 @@
 # Change Log
 
+## 0.4.0 (2026-04-05)
+
+- 🧹 Cleanup: **Remove broken webview login** - the old webview-based automatic login couldn't display QR code correctly because WeChat blocks embedding in iframes, so it's removed now
+- 👉 **Default to Chrome CDP Fully Automated Login** - The primary login method is now fully automatic via Puppeteer/CDP
+- 👍 Still keeps **Manual Cookie Input** as fallback option for advanced users
+- 🎯 Simplified command menu - fewer options, clearer workflow
+
 ## 0.3.0 (2026-04-05)
 
 - ✨ New Feature: **Chrome CDP (Puppeteer) Fully Automated Login** - Add third login method that automatically launches Chrome browser, lets you scan QR code, and extracts cookies automatically. This solves the QR code display issue in VSCode webview (WeChat blocks QR in iframes).
