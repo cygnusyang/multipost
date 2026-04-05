@@ -1,5 +1,11 @@
 # Change Log
 
+## 0.1.6 (2026-04-05)
+
+- 🔧 Ensure error messages show on activation failure
+- 🐛 Fix: ensure activation completes even if canvas fails to load
+- 🏷️ Bump version to 0.1.6
+
 ## 0.1.5 (2026-04-05)
 
 - 🐛 Fix: command not found when invoking command before opening markdown file
