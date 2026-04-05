@@ -1,5 +1,11 @@
 # Change Log
 
+## 0.1.9 (2026-04-05)
+
+- 🐛 Fix: `Cannot find module 'node-fetch'` - add missing runtime dependencies to dependencies
+- `node-fetch` and `form-data` are required at runtime, must be in `dependencies` not `devDependencies`
+- 🏷️ Bump version to 0.1.9
+
 ## 0.1.8 (2026-04-05)
 
 - 🐛 Fix: Ensure all commands are available from command palette without open Markdown file

@@ -184,7 +184,7 @@ export class WeChatService implements IWeChatService {
       });
 
       this.log(`Upload response status: ${response.status}`);
-      const result = await response.json();
+      const result: any = await response.json();
       this.log(`Upload response: ${JSON.stringify(result)}`);
 
       if (result.base_resp && result.base_resp.err_msg === 'ok') {
@@ -261,7 +261,7 @@ export class WeChatService implements IWeChatService {
       });
 
       this.log(`Draft creation response status: ${response.status}`);
-      const result = await response.json();
+      const result: any = await response.json();
       this.log(`Draft creation response: ${JSON.stringify(result)}`);
 
       if (result.errmsg === 'ok' || result.base_resp?.err_msg === 'ok') {
