@@ -47,15 +47,11 @@
       },
       {
         "command": "multipost.uploadToWeChat",
-        "title": "Upload to WeChat Official Accounts",
+        "title": "Upload to WeChat Official Accounts (CDP Automated)",
         "icon": {
           "light": "media/icons/upload-light.svg",
           "dark": "media/icons/upload-dark.svg"
         }
-      },
-      {
-        "command": "multipost.uploadToWeChat",
-        "title": "Upload to WeChat Official Accounts (CDP Automated)"
       },
       {
         "command": "multipost.loginWeChatChromeCdp",
