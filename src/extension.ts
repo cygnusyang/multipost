@@ -251,17 +251,28 @@ export async function activate(context: vscode.ExtensionContext) {
               const digest = html.replace(/<[^>]*>/g, '').slice(0, 120);
               log(`Processing complete: HTML length = ${html.length} characters, author = "${author}"`);
 
-              // Check if we already have an active CDP session
-              if (!chromeCdpService.isSessionActive()) {
-                log('Starting new authenticated CDP session with saved cookies');
-                await chromeCdpService.startAuthenticatedSession(authInfo.cookies);
+              // If we have an active CDP session (Chrome is open), use browser automation to create draft
+              // Otherwise, fall back to API upload for manual cookie login users
+              if (chromeCdpService.isSessionActive()) {
+                // CDP mode - create draft directly in browser via automation
+                const draftUrl = await chromeCdpService.createDraftInBrowser(title, author, html, digest);
+                vscode.window.showInformationMessage('Draft created successfully in Chrome!');
+                log(`Draft created successfully: ${draftUrl}`);
+              } else {
+                // Manual mode - use API upload (original behavior)
+                const result = await weChatService.createDraft(title, author, html, digest);
+                if (result.success && result.draftUrl) {
+                  vscode.window.showInformationMessage('Draft created successfully!');
+                  log(`Draft created successfully: ${result.draftUrl}`);
+                  if (settingsService.shouldAutoOpenDraft()) {
+                    await vscode.env.openExternal(vscode.Uri.parse(result.draftUrl));
+                    log('Opening draft in browser');
+                  }
+                } else {
+                  vscode.window.showErrorMessage(`Upload failed: ${result.error}`);
+                  log(`Upload failed: ${result.error}`, 'error');
+                }
               }
-
-              // Create draft directly in browser via CDP automation
-              const draftUrl = await chromeCdpService.createDraftInBrowser(title, author, html, digest);
-
-              vscode.window.showInformationMessage('Draft created successfully in Chrome!');
-              log(`Draft created successfully: ${draftUrl}`);
             } catch (error) {
               vscode.window.showErrorMessage(`Upload failed: ${(error as Error).message}`);
               log(`Unexpected error during upload: ${(error as Error).message}`, 'error');
