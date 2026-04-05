@@ -25,31 +25,34 @@ VS Code 扩展 - 将 Markdown 文件一键发布到微信公众号，支持 Merm
 
 ## 使用方法
 
-### 1. 登录微信公众号
+所有命令都以 `MultiPost: ` 前缀显示在命令面板中。
 
-1. 按 `Cmd+Shift+P` (macOS) 或 `Ctrl+Shift+P` (Windows/Linux) 打开命令面板
-2. 输入 `WeChat: Login WeChat Official Accounts` 执行
-3. 在打开的页面中，用微信扫码登录你的公众号后台
-4. 登录成功后关闭登录标签页，插件会自动保存登录状态
+### 方式一：CDP 全自动推荐（推荐）
 
-### 2. 预览微信格式
+**CDP Fully Automated Upload**
+
+1. 打开 `.md` Markdown 文件
+2. 打开命令面板（`Cmd+Shift+P` / `Ctrl+Shift+P`）
+3. 输入 `CDP Fully Automated Upload` 执行
+4. 如果未登录：会自动打开 Chrome，扫码登录后自动保存凭据并上传
+5. 如果已登录：直接在浏览器中创建草稿
+6. Mermaid 图表会自动渲染为图片并上传到微信 CDN
+
+### 方式二：手动 Cookie 模式
+
+1. **Input Cookie (Manual Login)** - 手动输入从浏览器复制的 Cookie
+2. **Upload to WeChat Official Accounts** - 上传当前 Markdown 到微信公众号草稿
+
+### 其他命令
+
+- **Preview MultiPost Format** - 在侧边栏预览转换后的微信 HTML 格式
+- **Logout MultiPost** - 清除保存的登录凭据
+
+### 预览微信格式
 
 1. 打开一个 `.md` Markdown 文件
-2. 打开命令面板，输入 `WeChat: Preview WeChat Format`
+2. 打开命令面板，输入 `Preview MultiPost Format`
 3. 会在侧边打开预览窗口，显示微信公众号格式的预览
-
-### 3. 发布到微信公众号
-
-在预览窗口点击 **"Upload to WeChat"** 按钮，或者：
-
-1. 打开命令面板
-2. 输入 `WeChat: Upload to WeChat Official Accounts`
-3. 等待上传完成
-4. 上传成功后会自动打开微信公众号草稿页面，你可以在那里编辑和发布
-
-### 4. 退出登录
-
-打开命令面板，输入 `WeChat: Logout WeChat Official Accounts`
 
 ## 配置
 
