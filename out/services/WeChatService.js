@@ -130,36 +130,75 @@ class WeChatService {
             const html = await response.text();
             this.log(`Response HTML length: ${html.length} characters`);
             // Extract tokens using regex from HTML
-            // Try multiple patterns to handle different page structures (more robust)
-            let tokenMatch = html.match(/token\s*[=:]\s*["']([^"']+)["']/);
-            if (!tokenMatch) {
-                tokenMatch = html.match(/t:\s*["']([^"']+)["']/);
-            }
-            // More specific: look for token inside script assignment
-            if (!tokenMatch) {
-                tokenMatch = html.match(/window\.[^=]*=\s*\{[^}]*token["']?\s*:\s*["']([^"']+)["']/);
-            }
+            // Try multiple patterns to handle different page structures (very robust)
+            let tokenMatch = null;
+            // Pattern 1: token = "xxx" or token: "xxx"
+            tokenMatch = html.match(/token\s*[=:]\s*["']([^"']+)["']/);
+            // Pattern 2: t = "xxx" or t: "xxx" (original pattern)
+            if (!tokenMatch)
+                tokenMatch = html.match(/t\s*[=:]\s*["']([^"']+)["']/);
+            // Pattern 3: token without quotes
+            if (!tokenMatch)
+                tokenMatch = html.match(/token\s*[=:]\s*([a-zA-Z0-9_-]+)/);
+            // Pattern 4: look inside script window assignment with any property
+            if (!tokenMatch)
+                tokenMatch = html.match(/token["']?\s*:\s*["']([^"']+)["']/);
+            // Pattern 5: more greedy search across multiple lines
+            if (!tokenMatch)
+                tokenMatch = html.match(/window\.[^<]*token["']?\s*:\s*["']([^"']+)["']/);
+            // Pattern 6: look for token in cgiData or similar
+            if (!tokenMatch)
+                tokenMatch = html.match(/cgiData\s*=\s*\{[\s\S]*?token["']?\s*:\s*["']([^"']+)["']/);
             if (!tokenMatch) {
                 this.log('Failed to extract token from HTML', 'error');
-                this.log('HTML preview (first 1000 chars):' + html.substring(0, 1000), 'error');
+                this.log('HTML preview (first 2000 chars):' + html.substring(0, 2000), 'error');
                 return { isAuthenticated: false };
             }
-            this.log(`Token found: ${tokenMatch[1]}`);
-            // Try multiple patterns for other fields (more robust)
-            const ticketMatch = html.match(/ticket\s*[=:]\s*["']([^"']+)["']/) || html.match(/ticket:\s*["']([^"']+)["']/);
-            const userNameMatch = html.match(/user_name\s*[=:]\s*["']([^"']+)["']/) || html.match(/user_name:\s*["']([^"']+)["']/);
-            const nickNameMatch = html.match(/nick_name\s*[=:]\s*["']([^"']+)["']/) || html.match(/nick_name:\s*["']([^"']+)["']/);
-            const timeMatch = html.match(/time\s*[=:]\s*["']?(\d+)["']?/) || html.match(/time:\s*["'](\d+)["']/);
-            const avatarMatch = html.match(/head_img\s*[=:]\s*["']([^"']+)["']/) || html.match(/head_img:\s*['"]([^'"]+)['"]/);
+            const token = tokenMatch[1].trim();
+            this.log(`Token found: ${token}`);
+            // Try multiple patterns for other fields (very robust)
+            const findMatch = (patterns) => {
+                for (const pat of patterns) {
+                    const m = html.match(pat);
+                    if (m && m[1])
+                        return m[1].trim();
+                }
+                return undefined;
+            };
+            const ticket = findMatch([
+                /ticket\s*[=:]\s*["']([^"']+)["']/,
+                /ticket:\s*["']([^"']+)["']/,
+                /ticket["']?\s*:\s*["']([^"']+)["']/,
+            ]);
+            const userName = findMatch([
+                /user_name\s*[=:]\s*["']([^"']+)["']/,
+                /user_name:\s*["']([^"']+)["']/,
+                /user_name["']?\s*:\s*["']([^"']+)["']/,
+            ]);
+            const nickName = findMatch([
+                /nick_name\s*[=:]\s*["']([^"']+)["']/,
+                /nick_name:\s*["']([^"']+)["']/,
+                /nick_name["']?\s*:\s*["']([^"']+)["']/,
+            ]);
+            const time = findMatch([
+                /time\s*[=:]\s*["']?(\d+)["']?/,
+                /time:\s*["'](\d+)["']/,
+                /time["']?\s*:\s*["']?(\d+)["']?/,
+            ]);
+            const avatar = findMatch([
+                /head_img\s*[=:]\s*["']([^"']+)["']/,
+                /head_img:\s*['"]([^'"]+)['"]/,
+                /head_img["']?\s*:\s*["']([^"']+)["']/,
+            ]);
             const cookies = response.headers.raw()['set-cookie'] || [];
             this.log(`Cookies received: ${cookies.length} cookies`);
             const newAuthInfo = {
-                token: tokenMatch[1],
-                ticket: ticketMatch ? ticketMatch[1] : '',
-                userName: userNameMatch ? userNameMatch[1] : '',
-                nickName: nickNameMatch ? nickNameMatch[1] : '',
-                svrTime: timeMatch ? Number(timeMatch[1]) : Date.now() / 1000,
-                avatar: avatarMatch ? avatarMatch[1] : '',
+                token: token,
+                ticket: ticket || '',
+                userName: userName || '',
+                nickName: nickName || '',
+                svrTime: time ? Number(time) : Date.now() / 1000,
+                avatar: avatar || '',
                 cookies: cookies,
             };
             this.log(`Auth info extracted: nickName=${newAuthInfo.nickName}, userName=${newAuthInfo.userName}`);
