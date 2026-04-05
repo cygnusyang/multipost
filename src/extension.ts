@@ -191,23 +191,37 @@ export async function activate(context: vscode.ExtensionContext) {
           return;
         }
 
-        const authInfo = weChatService.getAuthInfo();
+        let authInfo = weChatService.getAuthInfo();
+
+        // If not authenticated, we need to do a login first
         if (!authInfo) {
-          vscode.window.showErrorMessage('Not logged in. Please login first.');
-          log('Error: Not authenticated, prompting login', 'error');
-          await vscode.commands.executeCommand('wechat-publisher.loginWeChatChromeCdp');
-          return;
-        }
+          log('Not authenticated, starting automatic CDP login before upload');
+          vscode.window.showInformationMessage('Starting Chrome for login...');
 
-        log(`User authenticated: ${authInfo.nickName}`);
+          // Run the login flow
+          const cookies = await chromeCdpService.startFirstTimeLogin();
+          const result = await weChatService.checkAuthWithCookies(cookies);
 
-        // Check auth is still valid
-        log('Checking if authentication is still valid...');
-        const authCheck = await weChatService.checkAuth();
-        if (!authCheck.isAuthenticated) {
-          vscode.window.showErrorMessage('Authentication expired. Please login again.');
-          log('Error: Authentication expired', 'error');
-          return;
+          if (!result.isAuthenticated || !result.authInfo) {
+            vscode.window.showErrorMessage('Login failed. Please try again.');
+            log('Login failed', 'error');
+            return;
+          }
+
+          authInfo = result.authInfo;
+          log(`User authenticated: ${authInfo.nickName}`);
+          updatePreviewAuthStatus();
+        } else {
+          log(`User authenticated: ${authInfo.nickName}`);
+
+          // Check auth is still valid
+          log('Checking if authentication is still valid...');
+          const authCheck = await weChatService.checkAuth();
+          if (!authCheck.isAuthenticated) {
+            vscode.window.showErrorMessage('Authentication expired. Please login again.');
+            log('Error: Authentication expired', 'error');
+            return;
+          }
         }
 
         const markdown = editor.document.getText();
