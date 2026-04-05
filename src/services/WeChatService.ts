@@ -82,8 +82,8 @@ export class WeChatService implements IWeChatService {
               expires: oneYearFromNow,
               httpOnly: false,
               secure: true,
-              sameSite: 'Lax' as const,
-            };
+              sameSite: 'Lax',
+            } as CookieParam;
           }).filter(cookie => !!cookie.name && cookie.value !== undefined);
           // Save the converted format
           await this.saveAuthInfo(this.authInfo);
