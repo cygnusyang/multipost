@@ -71,8 +71,8 @@ export class ChromeCDPService {
 
       this.log('Login detected, extracting cookies');
 
-      // Get all cookies from the page - puppeteer deprecated the 0-args version but it still works
-      const cookies = await page.cookies();
+      // Get all cookies from the page for the current URL
+      const cookies = await page.cookies(page.url());
       this.log(`Extracted ${cookies.length} cookies from Chrome`);
 
       // Format cookies into the expected format "name=value"
@@ -96,6 +96,19 @@ export class ChromeCDPService {
    */
   async startAuthenticatedSession(cookieStrings: string[]): Promise<void> {
     this.log(`Starting authenticated session with ${cookieStrings.length} saved cookies`);
+
+    // Close any existing browser session before starting a new one
+    if (this.browser) {
+      try {
+        // Check if browser is still connected before trying to close
+        if (this.browser.connected) {
+          this.log('Closing existing browser session');
+          await this.browser.close();
+        }
+      } catch (error) {
+        this.log(`Error closing existing browser: ${error}`, 'info');
+      }
+    }
 
     // Parse cookie strings into Puppeteer CookieParam objects
     const cookies: CookieParam[] = cookieStrings.map(cookieStr => {
@@ -122,7 +135,9 @@ export class ChromeCDPService {
       const page = await this.browser.newPage();
 
       // Set cookies before navigating
-      await page.setCookie(...cookies);
+      for (const cookie of cookies) {
+        await page.setCookie(cookie);
+      }
       this.log(`Injected ${cookies.length} cookies into browser`);
 
       await page.goto('https://mp.weixin.qq.com/', {
