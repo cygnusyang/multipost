@@ -68,7 +68,8 @@ export class ChromeCDPService {
       this.log('Login detected, extracting cookies');
 
       // Get all cookies from the page for the current URL
-      const cookies = await page.cookies(page.url());
+      // Deprecation note: page.cookies(url) is deprecated, use page.cookies() instead
+      const cookies = await page.cookies();
       this.log(`Extracted ${cookies.length} cookies from Chrome`);
 
       // Keep browser open for authenticated session
@@ -139,7 +140,13 @@ export class ChromeCDPService {
     try {
       const page = await this.browser.newPage();
 
-      // Set cookies before navigating - set one by one with individual error handling
+      // Navigate first (required for domain/path cookie validation in CDP)
+      // CDP cannot set cookies with domain until page is on the correct domain
+      await page.goto('https://mp.weixin.qq.com/', {
+        waitUntil: 'networkidle2',
+      });
+
+      // Now set cookies after navigation - set one by one with individual error handling
       // If a cookie fails, just log and skip it (inspired by automation/buying scripts)
       let successCount = 0;
       let failCount = 0;
@@ -158,10 +165,6 @@ export class ChromeCDPService {
       if (successCount === 0 && failCount > 0) {
         throw new Error(`All ${failCount} cookies failed to set. Cannot proceed with authentication.`);
       }
-
-      await page.goto('https://mp.weixin.qq.com/', {
-        waitUntil: 'networkidle2',
-      });
 
       // Check if we're already logged in
       const isLoggedIn = await this.waitForLogin(page);
