@@ -1,5 +1,14 @@
 # Change Log
 
+## 0.1.11 (2026-04-05)
+
+- 🐛 Fix: WeChat login QR code fails to load - WeChat blocks page embedding in iframe
+- 🔄 Changed login flow: open login page in external browser instead of iframe
+- ✨ User scans QR in browser, then clicks "Confirm Login" in VSCode
+- 🛡️ Add Content-Security-Policy to preview webview for improved security
+- 🎯 Improve path resolution for webview assets
+- 🏷️ Bump version to 0.1.11
+
 ## 0.1.10 (2026-04-05)
 
 - 🐛 Fix: ESM compatibility issue - node-fetch@3 is ESM-only, incompatible with VSCode extension CommonJS
