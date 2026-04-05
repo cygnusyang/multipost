@@ -118,6 +118,44 @@ describe('ChromeCDPService', () => {
     expect(service.isSessionActive()).toBe(true);
   });
 
+  it('should only inject sanitized valid cookies', async () => {
+    const page = makePage();
+    page.evaluate.mockResolvedValue(true);
+    const browser = makeBrowser(page);
+    (puppeteer.launch as jest.Mock).mockResolvedValue(browser);
+    const service = new ChromeCDPService(mockOutputChannel);
+
+    await service.startAuthenticatedSession([
+      {
+        name: 'token',
+        value: 'x',
+        domain: '.mp.weixin.qq.com',
+        path: '/',
+        secure: true,
+        httpOnly: true,
+        sameSite: 'Lax',
+        expires: 9999999999,
+        sourcePort: 443,
+      } as any,
+      {
+        name: 'broken',
+        value: 'y',
+      } as any,
+    ]);
+
+    expect(page.setCookie).toHaveBeenCalledTimes(1);
+    expect(page.setCookie).toHaveBeenCalledWith({
+      name: 'token',
+      value: 'x',
+      domain: '.mp.weixin.qq.com',
+      path: '/',
+      secure: true,
+      httpOnly: true,
+      sameSite: 'Lax',
+      expires: 9999999999,
+    });
+  });
+
   it('should fall back to qr login when saved cookies are not enough', async () => {
     const page = makePage();
     const browser = makeBrowser(page);

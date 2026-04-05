@@ -117,15 +117,9 @@ export class ChromeCDPService {
       }
     }
 
-    // Cookies are already full CookieParam objects from storage (saved when extracted from Chrome)
-    // Filter out any invalid cookies that miss required fields
-    const validCookies: CookieParam[] = cookies.filter(cookie => {
-      const isValid = !!cookie.name && typeof cookie.value === 'string' && !!cookie.domain && !!cookie.path;
-      if (!isValid) {
-        this.log(`Skipping invalid cookie (missing required fields): ${cookie.name || JSON.stringify(cookie)}`, 'warn');
-      }
-      return isValid;
-    });
+    const validCookies = cookies
+      .map(cookie => this.normalizeCookieForInjection(cookie))
+      .filter((cookie): cookie is CookieParam => cookie !== null);
 
     this.log(`Filtered to ${validCookies.length} valid cookies out of ${cookies.length} total`);
 
@@ -143,10 +137,10 @@ export class ChromeCDPService {
       const page = await this.browser.newPage();
 
       // Set cookies before navigating
-      for (const cookie of cookies) {
+      for (const cookie of validCookies) {
         await page.setCookie(cookie);
       }
-      this.log(`Injected ${cookies.length} cookies into browser`);
+      this.log(`Injected ${validCookies.length} cookies into browser`);
 
       await page.goto('https://mp.weixin.qq.com/', {
         waitUntil: 'networkidle2',
@@ -176,6 +170,45 @@ export class ChromeCDPService {
       await this.close();
       throw error;
     }
+  }
+
+  private normalizeCookieForInjection(cookie: CookieParam): CookieParam | null {
+    if (!cookie?.name || typeof cookie.value !== 'string') {
+      this.log(`Skipping invalid cookie (missing name/value): ${JSON.stringify(cookie)}`, 'warn');
+      return null;
+    }
+
+    const normalized: CookieParam = {
+      name: cookie.name,
+      value: cookie.value,
+    };
+
+    if (typeof cookie.url === 'string' && cookie.url.length > 0) {
+      normalized.url = cookie.url;
+    } else if (cookie.domain) {
+      normalized.domain = cookie.domain;
+      normalized.path = cookie.path || '/';
+    } else {
+      this.log(`Skipping invalid cookie (missing domain/url): ${cookie.name}`, 'warn');
+      return null;
+    }
+
+    if (typeof cookie.secure === 'boolean') {
+      normalized.secure = cookie.secure;
+    }
+    if (typeof cookie.httpOnly === 'boolean') {
+      normalized.httpOnly = cookie.httpOnly;
+    }
+
+    if (cookie.sameSite === 'Strict' || cookie.sameSite === 'Lax' || cookie.sameSite === 'None') {
+      normalized.sameSite = cookie.sameSite;
+    }
+
+    if (typeof cookie.expires === 'number' && Number.isFinite(cookie.expires) && cookie.expires > 0) {
+      normalized.expires = cookie.expires;
+    }
+
+    return normalized;
   }
 
   /**
