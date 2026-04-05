@@ -54,6 +54,9 @@ class PreviewService {
             this.panel.onDidDispose(() => {
                 this.panel = undefined;
             });
+            if (this.messageHandler) {
+                this.panel.webview.onDidReceiveMessage(this.messageHandler);
+            }
         }
         this.panel.webview.html = this.getWebviewContent();
         this.updateContent(markdown);
@@ -80,8 +83,15 @@ class PreviewService {
     getPanel() {
         return this.panel;
     }
+    setMessageHandler(handler) {
+        this.messageHandler = handler;
+        if (this.panel) {
+            this.panel.webview.onDidReceiveMessage(handler);
+        }
+    }
     findAssetFiles() {
-        const assetsPath = path.join(this.extensionUri.fsPath, 'media', 'webview', 'assets');
+        const basePath = this.extensionUri.fsPath || this.extensionUri.path;
+        const assetsPath = path.join(basePath, 'media', 'webview', 'assets');
         if (fs.existsSync(assetsPath)) {
             const files = fs.readdirSync(assetsPath);
             this.jsFileName = files.find(f => f.startsWith('main-') && f.endsWith('.js'));
@@ -97,7 +107,12 @@ class PreviewService {
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src ${webview.cspSource}; script-src ${webview.cspSource}; img-src ${webview.cspSource} https: data:;"
+    />
     <title>WeChat Preview</title>
+    <link rel="stylesheet" href="${styleUri}" />
   </head>
   <body>
     <div id="root"></div>

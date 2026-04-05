@@ -11,6 +11,11 @@ exports.commands = {
     executeCommand: jest.fn(),
 };
 exports.window = {
+    createOutputChannel: jest.fn(() => ({
+        appendLine: jest.fn(),
+        show: jest.fn(),
+        dispose: jest.fn(),
+    })),
     showErrorMessage: jest.fn(),
     showInformationMessage: jest.fn(),
     showWarningMessage: jest.fn(),
@@ -21,6 +26,8 @@ exports.window = {
                 html: '',
                 postMessage: jest.fn(),
                 asWebviewUri: jest.fn((uri) => uri),
+                onDidReceiveMessage: jest.fn(),
+                cspSource: 'vscode-webview://test',
             },
             reveal: jest.fn(),
             onDidDispose: jest.fn(),
@@ -35,8 +42,12 @@ exports.env = {
     },
 };
 exports.Uri = {
-    file: jest.fn((path) => ({ scheme: 'file', path })),
-    joinPath: jest.fn(),
+    file: jest.fn((path) => ({ scheme: 'file', path, fsPath: path })),
+    joinPath: jest.fn((base, ...paths) => ({
+        scheme: 'file',
+        path: [base.path || base.fsPath, ...paths].join('/'),
+        fsPath: [base.fsPath || base.path, ...paths].join('/'),
+    })),
     parse: jest.fn(),
 };
 var ViewColumn;

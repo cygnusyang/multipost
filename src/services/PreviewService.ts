@@ -6,6 +6,7 @@ export class PreviewService {
   private jsFileName: string | undefined;
   private cssFileName: string | undefined;
   private panel: vscode.WebviewPanel | undefined;
+  private messageHandler: ((message: any) => Thenable<void> | void) | undefined;
   private extensionUri: vscode.Uri;
 
   constructor(extensionUri: vscode.Uri) {
@@ -30,6 +31,10 @@ export class PreviewService {
       this.panel.onDidDispose(() => {
         this.panel = undefined;
       });
+
+      if (this.messageHandler) {
+        this.panel.webview.onDidReceiveMessage(this.messageHandler);
+      }
     }
 
     this.panel.webview.html = this.getWebviewContent();
@@ -63,9 +68,18 @@ export class PreviewService {
     return this.panel;
   }
 
+  setMessageHandler(handler: (message: any) => Thenable<void> | void): void {
+    this.messageHandler = handler;
+
+    if (this.panel) {
+      this.panel.webview.onDidReceiveMessage(handler);
+    }
+  }
+
   private findAssetFiles(): void {
+    const basePath = this.extensionUri.fsPath || this.extensionUri.path;
     const assetsPath = path.join(
-      this.extensionUri.fsPath,
+      basePath,
       'media',
       'webview',
       'assets'
@@ -92,7 +106,12 @@ export class PreviewService {
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src ${webview.cspSource}; script-src ${webview.cspSource}; img-src ${webview.cspSource} https: data:;"
+    />
     <title>WeChat Preview</title>
+    <link rel="stylesheet" href="${styleUri}" />
   </head>
   <body>
     <div id="root"></div>

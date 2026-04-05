@@ -10,6 +10,11 @@ export const commands = {
 };
 
 export const window = {
+  createOutputChannel: jest.fn(() => ({
+    appendLine: jest.fn(),
+    show: jest.fn(),
+    dispose: jest.fn(),
+  })),
   showErrorMessage: jest.fn(),
   showInformationMessage: jest.fn(),
   showWarningMessage: jest.fn(),
@@ -20,6 +25,8 @@ export const window = {
         html: '',
         postMessage: jest.fn(),
         asWebviewUri: jest.fn((uri: any) => uri),
+        onDidReceiveMessage: jest.fn(),
+        cspSource: 'vscode-webview://test',
       },
       reveal: jest.fn(),
       onDidDispose: jest.fn(),
@@ -36,8 +43,12 @@ export const env = {
 };
 
 export const Uri = {
-  file: jest.fn((path: string) => ({ scheme: 'file', path })),
-  joinPath: jest.fn(),
+  file: jest.fn((path: string) => ({ scheme: 'file', path, fsPath: path })),
+  joinPath: jest.fn((base: any, ...paths: string[]) => ({
+    scheme: 'file',
+    path: [base.path || base.fsPath, ...paths].join('/'),
+    fsPath: [base.fsPath || base.path, ...paths].join('/'),
+  })),
   parse: jest.fn(),
 };
 

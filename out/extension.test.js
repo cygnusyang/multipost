@@ -92,8 +92,8 @@ describe('extension', () => {
         await expect((0, extension_1.activate)(mockContext)).resolves.not.toThrow();
         // Should have registered all 4 commands
         expect(vscode.commands.registerCommand).toHaveBeenCalledTimes(4);
-        // All commands should be pushed to subscriptions
-        expect(mockContext.subscriptions).toHaveLength(4);
+        // Output channel plus 4 commands should be pushed to subscriptions
+        expect(mockContext.subscriptions).toHaveLength(5);
         // Get all the command callbacks and invoke them to get coverage
         const registerCommandCalls = vscode.commands.registerCommand.mock.calls;
         // Test preview command with no active editor
