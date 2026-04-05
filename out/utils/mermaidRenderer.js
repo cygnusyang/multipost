@@ -40,32 +40,62 @@ const jsdom_1 = require("jsdom");
 // We'll dynamically initialize it only when needed
 let mermaidInstance;
 let mermaidInitialized = false;
+function log(message, level = 'info') {
+    const timestamp = new Date().toISOString();
+    const logMessage = `[${timestamp}] [${level.toUpperCase()}] [mermaid] ${message}`;
+    if (level === 'error') {
+        console.error(logMessage);
+    }
+    else {
+        console.log(logMessage);
+    }
+}
 async function initMermaid() {
     if (mermaidInitialized) {
+        log('Mermaid already initialized');
         return;
     }
-    // Create a full DOM environment with jsdom
-    const dom = new jsdom_1.JSDOM('<!DOCTYPE html><html><body></body></html>');
-    global.window = dom.window;
-    global.document = dom.window.document;
-    global.navigator = dom.window.navigator;
-    // Dynamic import after DOM is ready
-    const mermaidModule = await Promise.resolve().then(() => __importStar(require('mermaid')));
-    mermaidInstance = mermaidModule.default;
-    mermaidInstance.initialize({
-        startOnLoad: false,
-        theme: 'default',
-        flowchart: {
-            useMaxWidth: true,
-        },
-    });
-    mermaidInitialized = true;
+    log('Starting mermaid initialization...');
+    try {
+        // Create a full DOM environment with jsdom
+        log('Creating JSDOM environment...');
+        const dom = new jsdom_1.JSDOM('<!DOCTYPE html><html><body></body></html>');
+        global.window = dom.window;
+        global.document = dom.window.document;
+        global.navigator = dom.window.navigator;
+        log('JSDOM global objects set up');
+        // Dynamic import after DOM is ready
+        log('Dynamically importing mermaid module...');
+        const mermaidModule = await Promise.resolve().then(() => __importStar(require('mermaid')));
+        mermaidInstance = mermaidModule.default;
+        const mermaidVersion = mermaidModule.version || mermaidModule.default?.version || 'unknown';
+        log(`Mermaid module imported: version ${mermaidVersion}`);
+        mermaidInstance.initialize({
+            startOnLoad: false,
+            theme: 'default',
+            flowchart: {
+                useMaxWidth: true,
+            },
+        });
+        log('Mermaid initialized successfully');
+        mermaidInitialized = true;
+    }
+    catch (error) {
+        log(`Mermaid initialization failed: ${error.message}`, 'error');
+        if (error instanceof Error && error.stack) {
+            log(`Stack: ${error.stack}`, 'error');
+        }
+        throw error;
+    }
 }
 async function renderMermaidToBuffer(code) {
+    log(`Rendering mermaid diagram, code length: ${code.length} characters`);
     await initMermaid();
     try {
         // Get SVG from mermaid
+        log('Calling mermaid.render...');
         const { svg } = await mermaidInstance.render('mermaid-diagram', code);
+        log(`Mermaid render complete, SVG length: ${svg.length} characters`);
         // Calculate dimensions
         const viewBoxMatch = svg.match(/viewBox="[\d.\s-]+"/);
         let width = 800;
@@ -80,20 +110,24 @@ async function renderMermaidToBuffer(code) {
         // Add padding
         width += 40;
         height += 40;
+        log(`Calculated dimensions: ${width}x${height}`);
         // Create canvas and draw SVG
+        log(`Creating canvas: ${width}x${height}`);
         const canvas = (0, canvas_1.createCanvas)(width, height);
         const ctx = canvas.getContext('2d');
         // Fill white background
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, width, height);
         // Convert SVG to PNG buffer
-        // For simplicity, we'll use the SVG directly and let canvas handle conversion
-        // Note: In production, you might need svg2png or another library for proper rasterization
         const pngBuffer = canvas.toBuffer('image/png');
+        log(`PNG buffer generated: ${pngBuffer.length} bytes`);
         return pngBuffer;
     }
     catch (error) {
-        console.error('Mermaid render error:', error);
+        log(`Mermaid render error: ${error.message}`, 'error');
+        if (error instanceof Error && error.stack) {
+            log(`Stack trace: ${error.stack}`, 'error');
+        }
         throw error;
     }
 }

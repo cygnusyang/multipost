@@ -1,5 +1,19 @@
 # Change Log
 
+## 0.1.8 (2026-04-05)
+
+- 🐛 Fix: Ensure all commands are available from command palette without open Markdown file
+- 🚀 Add explicit onCommand activation events for all four commands
+- 🔍 Already has comprehensive debug logging for easier troubleshooting
+- 🏷️ Bump version to 0.1.8
+
+## 0.1.7 (2026-04-05)
+
+- 🔍 Add comprehensive debug logging throughout the extension
+- 🛠️ Improved error tracing for activation and command execution
+- All activation steps logged to MultiPost output channel
+- 🏷️ Bump version to 0.1.7
+
 ## 0.1.6 (2026-04-05)
 
 - 🔧 Ensure error messages show on activation failure

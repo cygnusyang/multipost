@@ -4,13 +4,13 @@
 
 ### 方法 1：从 VSIX 文件安装（推荐）
 
-扩展已经打包好了：`vscode-wechat-publisher-0.0.1.vsix`
+扩展已经打包好了：`multipost-0.1.8.vsix`（生成后）
 
 1. 打开 VSCode
 2. 打开扩展面板（Ctrl+Shift+X 或 Cmd+Shift+X）
 3. 点击右上角 `...` 菜单
 4. 选择 **"从 VSIX 安装..."**
-5. 选择文件：`vscode-wechat-publisher/vscode-wechat-publisher-0.0.1.vsix`
+5. 选择文件：`multipost-0.1.8.vsix`
 6. 重启 VSCode 生效
 
 ### 方法 2：开发模式运行
@@ -18,7 +18,7 @@
 如果你想修改代码，可以在开发模式运行：
 
 ```bash
-cd vscode-wechat-publisher
+cd MultiPost
 npm install
 npm run compile
 # 按 F5 启动扩展开发窗口
@@ -80,7 +80,7 @@ npm run compile
 ## 项目结构
 
 ```
-vscode-wechat-publisher/
+MultiPost/
 ├── src/                    # VSCode 扩展后端 (TypeScript)
 │   ├── extension.ts        # 入口文件
 │   ├── interfaces/         # 接口定义
@@ -94,7 +94,7 @@ vscode-wechat-publisher/
 │   │   └── themes/         # 主题样式
 │   └── vite.config.ts      # Vite 配置
 ├── media/                  # 构建输出
-└── vscode-wechat-publisher-0.0.1.vsix  # 安装包
+└── multipost-0.1.8.vsix    # 安装包
 ```
 
 ## 开发

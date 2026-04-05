@@ -8,19 +8,44 @@ const STORAGE_KEY = 'wechat-publisher.auth';
 export class WeChatService implements IWeChatService {
   private authInfo: WeChatAuthInfo | null = null;
   private secretStorage: vscode.SecretStorage;
+  private outputChannel: vscode.OutputChannel;
 
   constructor(secretStorage: vscode.SecretStorage) {
     this.secretStorage = secretStorage;
+    this.outputChannel = vscode.window.createOutputChannel('MultiPost WeChat');
+  }
+
+  private log(message: string, level: 'info' | 'error' | 'warn' = 'info'): void {
+    const timestamp = new Date().toISOString();
+    const logMessage = `[${timestamp}] [${level.toUpperCase()}] ${message}`;
+    
+    if (level === 'error') {
+      this.outputChannel.appendLine(logMessage);
+      console.error(logMessage);
+    } else {
+      this.outputChannel.appendLine(logMessage);
+      console.log(logMessage);
+    }
+  }
+
+  private showOutputChannel(): void {
+    this.outputChannel.show(true);
   }
 
   async loadAuthFromStorage(): Promise<void> {
+    this.log('Loading auth from storage...');
     const stored = await this.secretStorage.get(STORAGE_KEY);
     if (stored) {
       try {
         this.authInfo = JSON.parse(stored);
+        this.log(`Auth loaded successfully for user: ${this.authInfo?.nickName || 'unknown'}`);
       } catch (e) {
+        this.log('Failed to parse stored auth data', 'error');
+        this.log(String(e), 'error');
         this.authInfo = null;
       }
+    } else {
+      this.log('No stored auth data found');
     }
   }
 
@@ -39,29 +64,44 @@ export class WeChatService implements IWeChatService {
   }
 
   async checkAuth(): Promise<{ isAuthenticated: boolean; authInfo?: WeChatAuthInfo }> {
+    this.log('Starting WeChat auth check...');
+    this.showOutputChannel();
+    
     try {
       const headers = this.getRequestHeaders();
+      this.log('Sending request to WeChat...', 'info');
+      
       const response = await fetch('https://mp.weixin.qq.com/', {
         method: 'GET',
         headers: headers,
         redirect: 'follow',
       });
 
-      const html = await response.text();
+      this.log(`Response status: ${response.status} ${response.statusText}`);
+      this.log(`Response headers: ${JSON.stringify(response.headers.raw(), null, 2)}`);
 
+      const html = await response.text();
+      this.log(`Response HTML length: ${html.length} characters`);
+      
       // Extract tokens using regex from HTML
       const tokenMatch = html.match(/data:\s*\{[\s\S]*?t:\s*["']([^"']+)["']/);
       if (!tokenMatch) {
+        this.log('Failed to extract token from HTML', 'error');
+        this.log('HTML preview (first 500 chars):' + html.substring(0, 500), 'error');
         return { isAuthenticated: false };
       }
+
+      this.log(`Token found: ${tokenMatch[1]}`);
 
       const ticketMatch = html.match(/ticket:\s*["']([^"']+)["']/);
       const userNameMatch = html.match(/user_name:\s*["']([^"']+)["']/);
       const nickNameMatch = html.match(/nick_name:\s*["']([^"']+)["']/);
-      const timeMatch = html.match(/time:\s*["'](\d+)["']/);
+      const timeMatch = html.match(/time:\s*["'](\d+)["']/
+);
       const avatarMatch = html.match(/head_img:\s*['"]([^'"]+)['"]/);
 
       const cookies = response.headers.raw()['set-cookie'] || [];
+      this.log(`Cookies received: ${cookies.length} cookies`);
 
       const newAuthInfo: WeChatAuthInfo = {
         token: tokenMatch[1],
@@ -73,18 +113,29 @@ export class WeChatService implements IWeChatService {
         cookies: cookies,
       };
 
+      this.log(`Auth info extracted: nickName=${newAuthInfo.nickName}, userName=${newAuthInfo.userName}`);
+      this.log('Saving auth info...');
+      
       this.authInfo = newAuthInfo;
       await this.saveAuthInfo(newAuthInfo);
 
+      this.log('Auth check successful!', 'info');
       return { isAuthenticated: true, authInfo: newAuthInfo };
     } catch (error) {
-      console.error('WeChat auth check error:', error);
+      this.log('WeChat auth check error:', 'error');
+      this.log(String(error), 'error');
+      if (error instanceof Error) {
+        this.log(`Error stack: ${error.stack}`, 'error');
+      }
       return { isAuthenticated: false };
     }
   }
 
   async uploadImage(buffer: Buffer, filename: string): Promise<WeChatUploadResult> {
+    this.log(`Starting image upload: ${filename}, size: ${buffer.length} bytes`);
+    
     if (!this.authInfo) {
+      this.log('Image upload failed: Not authenticated', 'error');
       return { success: false, error: 'Not authenticated' };
     }
 
@@ -108,6 +159,7 @@ export class WeChatService implements IWeChatService {
       });
 
       const url = `https://mp.weixin.qq.com/cgi-bin/filetransfer?${params.toString()}`;
+      this.log(`Upload URL: ${url}`);
 
       const form = new FormData();
       form.append('type', 'image/jpeg');
@@ -131,18 +183,27 @@ export class WeChatService implements IWeChatService {
         body: form as any,
       });
 
+      this.log(`Upload response status: ${response.status}`);
       const result = await response.json();
+      this.log(`Upload response: ${JSON.stringify(result)}`);
 
       if (result.base_resp && result.base_resp.err_msg === 'ok') {
+        this.log(`Image uploaded successfully: ${result.cdn_url}`);
         return { success: true, cdnUrl: result.cdn_url };
       } else {
+        const error = result.base_resp?.err_msg || 'Upload failed';
+        this.log(`Image upload failed: ${error}`, 'error');
         return {
           success: false,
-          error: result.base_resp?.err_msg || 'Upload failed',
+          error: error,
         };
       }
     } catch (error) {
-      console.error('Image upload error:', error);
+      this.log('Image upload error:', 'error');
+      this.log(String(error), 'error');
+      if (error instanceof Error) {
+        this.log(`Error stack: ${error.stack}`, 'error');
+      }
       return { success: false, error: String(error) };
     }
   }
@@ -153,7 +214,10 @@ export class WeChatService implements IWeChatService {
     content: string,
     digest?: string
   ): Promise<WeChatDraftResult> {
+    this.log(`Creating draft: title="${title}", author="${author}"`);
+    
     if (!this.authInfo) {
+      this.log('Draft creation failed: Not authenticated', 'error');
       return { success: false, error: 'Not authenticated' };
     }
 
@@ -167,6 +231,7 @@ export class WeChatService implements IWeChatService {
       });
 
       const url = `https://mp.weixin.qq.com/cgi-bin/operate_appmsg?${params.toString()}`;
+      this.log(`Draft creation URL: ${url}`);
 
       // Build form data with all required fields
       const form = new URLSearchParams();
@@ -188,24 +253,33 @@ export class WeChatService implements IWeChatService {
       headers['Referer'] = 'https://mp.weixin.qq.com/';
       headers['Content-Type'] = 'application/x-www-form-urlencoded';
 
+      this.log(`Sending draft creation request...`);
       const response = await fetch(url, {
         method: 'POST',
         headers: headers,
         body: form.toString(),
       });
 
+      this.log(`Draft creation response status: ${response.status}`);
       const result = await response.json();
+      this.log(`Draft creation response: ${JSON.stringify(result)}`);
 
       if (result.errmsg === 'ok' || result.base_resp?.err_msg === 'ok') {
         const appMsgId = result.appMsgId || result.appmsgid;
         const draftUrl = `https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_edit&action=edit&type=77&appmsgid=${appMsgId}&token=${this.authInfo.token}&lang=zh_CN`;
+        this.log(`Draft created successfully: appMsgId=${appMsgId}`);
         return { success: true, appMsgId, draftUrl };
       } else {
         const errMsg = result.errmsg || result.base_resp?.err_msg || 'Create draft failed';
+        this.log(`Draft creation failed: ${errMsg}`, 'error');
         return { success: false, error: errMsg };
       }
     } catch (error) {
-      console.error('Create draft error:', error);
+      this.log('Create draft error:', 'error');
+      this.log(String(error), 'error');
+      if (error instanceof Error) {
+        this.log(`Error stack: ${error.stack}`, 'error');
+      }
       return { success: false, error: String(error) };
     }
   }

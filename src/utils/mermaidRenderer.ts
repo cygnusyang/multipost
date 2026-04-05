@@ -7,36 +7,66 @@ import { JSDOM } from 'jsdom';
 let mermaidInstance: any;
 let mermaidInitialized = false;
 
+function log(message: string, level: 'info' | 'error' | 'warn' = 'info'): void {
+  const timestamp = new Date().toISOString();
+  const logMessage = `[${timestamp}] [${level.toUpperCase()}] [mermaid] ${message}`;
+  if (level === 'error') {
+    console.error(logMessage);
+  } else {
+    console.log(logMessage);
+  }
+}
+
 async function initMermaid(): Promise<void> {
   if (mermaidInitialized) {
+    log('Mermaid already initialized');
     return;
   }
 
-  // Create a full DOM environment with jsdom
-  const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>');
-  global.window = dom.window as any;
-  global.document = dom.window.document;
-  global.navigator = dom.window.navigator;
+  log('Starting mermaid initialization...');
+  try {
+    // Create a full DOM environment with jsdom
+    log('Creating JSDOM environment...');
+    const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>');
+    global.window = dom.window as any;
+    global.document = dom.window.document;
+    global.navigator = dom.window.navigator;
+    log('JSDOM global objects set up');
 
-  // Dynamic import after DOM is ready
-  const mermaidModule = await import('mermaid');
-  mermaidInstance = mermaidModule.default;
-  mermaidInstance.initialize({
-    startOnLoad: false,
-    theme: 'default',
-    flowchart: {
-      useMaxWidth: true,
-    },
-  });
+    // Dynamic import after DOM is ready
+    log('Dynamically importing mermaid module...');
+    const mermaidModule = await import('mermaid');
+    mermaidInstance = mermaidModule.default;
+    const mermaidVersion = (mermaidModule as any).version || (mermaidModule.default as any)?.version || 'unknown';
+    log(`Mermaid module imported: version ${mermaidVersion}`);
 
-  mermaidInitialized = true;
+    mermaidInstance.initialize({
+      startOnLoad: false,
+      theme: 'default',
+      flowchart: {
+        useMaxWidth: true,
+      },
+    });
+    log('Mermaid initialized successfully');
+
+    mermaidInitialized = true;
+  } catch (error) {
+    log(`Mermaid initialization failed: ${(error as Error).message}`, 'error');
+    if (error instanceof Error && error.stack) {
+      log(`Stack: ${error.stack}`, 'error');
+    }
+    throw error;
+  }
 }
 
 export async function renderMermaidToBuffer(code: string): Promise<Buffer> {
+  log(`Rendering mermaid diagram, code length: ${code.length} characters`);
   await initMermaid();
   try {
     // Get SVG from mermaid
+    log('Calling mermaid.render...');
     const { svg } = await mermaidInstance.render('mermaid-diagram', code);
+    log(`Mermaid render complete, SVG length: ${svg.length} characters`);
 
     // Calculate dimensions
     const viewBoxMatch = svg.match(/viewBox="[\d.\s-]+"/);
@@ -54,8 +84,10 @@ export async function renderMermaidToBuffer(code: string): Promise<Buffer> {
     // Add padding
     width += 40;
     height += 40;
+    log(`Calculated dimensions: ${width}x${height}`);
 
     // Create canvas and draw SVG
+    log(`Creating canvas: ${width}x${height}`);
     const canvas = createCanvas(width, height);
     const ctx = canvas.getContext('2d');
 
@@ -64,12 +96,14 @@ export async function renderMermaidToBuffer(code: string): Promise<Buffer> {
     ctx.fillRect(0, 0, width, height);
 
     // Convert SVG to PNG buffer
-    // For simplicity, we'll use the SVG directly and let canvas handle conversion
-    // Note: In production, you might need svg2png or another library for proper rasterization
     const pngBuffer = canvas.toBuffer('image/png');
+    log(`PNG buffer generated: ${pngBuffer.length} bytes`);
     return pngBuffer;
   } catch (error) {
-    console.error('Mermaid render error:', error);
+    log(`Mermaid render error: ${(error as Error).message}`, 'error');
+    if (error instanceof Error && error.stack) {
+      log(`Stack trace: ${error.stack}`, 'error');
+    }
     throw error;
   }
 }
