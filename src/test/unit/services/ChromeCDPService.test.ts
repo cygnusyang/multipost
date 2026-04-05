@@ -52,7 +52,7 @@ describe('ChromeCDPService', () => {
     const browser = makeBrowser(page);
     (puppeteer.launch as jest.Mock).mockResolvedValue(browser);
 
-    const service = new ChromeCDPService(mockOutputChannel);
+    const service = new ChromeCDPService(mockOutputChannel, '/tmp/multipost');
     const cookies = await service.startFirstTimeLogin();
 
     expect(puppeteer.launch).toHaveBeenCalled();
@@ -69,7 +69,7 @@ describe('ChromeCDPService', () => {
     const browser = makeBrowser(page);
     (puppeteer.launch as jest.Mock).mockResolvedValue(browser);
 
-    const service = new ChromeCDPService(mockOutputChannel);
+    const service = new ChromeCDPService(mockOutputChannel, '/tmp/multipost');
     await service.startFirstTimeLogin();
     await service.startAuthenticatedSession([{ name: 'token', value: 'x', domain: '.mp.weixin.qq.com', path: '/' }]);
 
@@ -77,7 +77,7 @@ describe('ChromeCDPService', () => {
   });
 
   it('should throw if creating draft without authenticated session', async () => {
-    const service = new ChromeCDPService(mockOutputChannel);
+    const service = new ChromeCDPService(mockOutputChannel, '/tmp/multipost');
 
     await expect(service.createDraftInBrowser('Title', 'Author', '<p>content</p>')).rejects.toThrow(
       'No authenticated browser session. Please login first.'
@@ -91,7 +91,7 @@ describe('ChromeCDPService', () => {
     const browser = makeBrowser(page);
     (puppeteer.launch as jest.Mock).mockResolvedValue(browser);
 
-    const service = new ChromeCDPService(mockOutputChannel);
+    const service = new ChromeCDPService(mockOutputChannel, '/tmp/multipost');
     await service.startFirstTimeLogin();
     await service.close();
 
@@ -104,7 +104,7 @@ describe('ChromeCDPService', () => {
     page.evaluate.mockResolvedValue(true);
     const browser = makeBrowser(page);
     (puppeteer.launch as jest.Mock).mockResolvedValue(browser);
-    const service = new ChromeCDPService(mockOutputChannel);
+    const service = new ChromeCDPService(mockOutputChannel, '/tmp/multipost');
 
     await service.startAuthenticatedSession([
       { name: 'token', value: 'x', domain: '.mp.weixin.qq.com', path: '/' },
@@ -123,7 +123,7 @@ describe('ChromeCDPService', () => {
     page.evaluate.mockResolvedValue(true);
     const browser = makeBrowser(page);
     (puppeteer.launch as jest.Mock).mockResolvedValue(browser);
-    const service = new ChromeCDPService(mockOutputChannel);
+    const service = new ChromeCDPService(mockOutputChannel, '/tmp/multipost');
 
     await service.startAuthenticatedSession([
       {
@@ -160,7 +160,7 @@ describe('ChromeCDPService', () => {
     const page = makePage();
     const browser = makeBrowser(page);
     (puppeteer.launch as jest.Mock).mockResolvedValue(browser);
-    const service = new ChromeCDPService(mockOutputChannel);
+    const service = new ChromeCDPService(mockOutputChannel, '/tmp/multipost');
     (service as any).waitForLogin = jest.fn()
       .mockResolvedValueOnce(false)
       .mockResolvedValueOnce(true);
@@ -177,7 +177,7 @@ describe('ChromeCDPService', () => {
     const page = makePage();
     const browser = makeBrowser(page);
     (puppeteer.launch as jest.Mock).mockResolvedValue(browser);
-    const service = new ChromeCDPService(mockOutputChannel);
+    const service = new ChromeCDPService(mockOutputChannel, '/tmp/multipost');
     (service as any).waitForLogin = jest.fn().mockResolvedValue(false);
 
     await expect(service.startFirstTimeLogin()).rejects.toThrow('Login timeout');
@@ -196,7 +196,7 @@ describe('ChromeCDPService', () => {
     page.frames.mockReturnValue([frame] as any);
     const browser = makeBrowser(page);
     (puppeteer.launch as jest.Mock).mockResolvedValue(browser);
-    const service = new ChromeCDPService(mockOutputChannel);
+    const service = new ChromeCDPService(mockOutputChannel, '/tmp/multipost');
 
     await service.startFirstTimeLogin();
     const draftUrl = await service.createDraftInBrowser('Title', 'Author', '<p>Hello</p>', 'Digest');
@@ -217,12 +217,134 @@ describe('ChromeCDPService', () => {
     page.frames.mockReturnValue([] as any);
     const browser = makeBrowser(page);
     (puppeteer.launch as jest.Mock).mockResolvedValue(browser);
-    const service = new ChromeCDPService(mockOutputChannel);
+    const service = new ChromeCDPService(mockOutputChannel, '/tmp/multipost');
 
     await service.startFirstTimeLogin();
 
     await expect(service.createDraftInBrowser('Title', 'Author', '<p>Hello</p>')).rejects.toThrow(
       'Could not find editor iframe'
     );
+  });
+
+  it('should handle cookie with invalid sameSite (boolean) and omit the field', async () => {
+    const page = makePage();
+    page.evaluate.mockResolvedValue(true);
+    const browser = makeBrowser(page);
+    (puppeteer.launch as jest.Mock).mockResolvedValue(browser);
+    const service = new ChromeCDPService(mockOutputChannel, '/tmp/multipost');
+
+    await service.startAuthenticatedSession([
+      { name: 'token', value: 'x', domain: '.mp.weixin.qq.com', path: '/', sameSite: true },
+    ] as any);
+
+    expect(page.setCookie).toHaveBeenCalledWith({
+      name: 'token',
+      value: 'x',
+      domain: '.mp.weixin.qq.com',
+      path: '/',
+      // sameSite should be omitted due to invalid type
+    });
+  });
+
+  it('should keep only url when cookie has both url and domain', async () => {
+    const page = makePage();
+    page.evaluate.mockResolvedValue(true);
+    const browser = makeBrowser(page);
+    (puppeteer.launch as jest.Mock).mockResolvedValue(browser);
+    const service = new ChromeCDPService(mockOutputChannel, '/tmp/multipost');
+
+    await service.startAuthenticatedSession([
+      {
+        name: 'token',
+        value: 'x',
+        url: 'https://mp.weixin.qq.com/',
+        domain: '.mp.weixin.qq.com',
+        path: '/',
+      },
+    ]);
+
+    // Should only have url, not domain/path (CDP doesn't allow both)
+    expect(page.setCookie).toHaveBeenCalledWith({
+      name: 'token',
+      value: 'x',
+      url: 'https://mp.weixin.qq.com/',
+    });
+  });
+
+  it('should omit expires when cookie has expires = 0 (session cookie)', async () => {
+    const page = makePage();
+    page.evaluate.mockResolvedValue(true);
+    const browser = makeBrowser(page);
+    (puppeteer.launch as jest.Mock).mockResolvedValue(browser);
+    const service = new ChromeCDPService(mockOutputChannel, '/tmp/multipost');
+
+    await service.startAuthenticatedSession([
+      { name: 'token', value: 'x', domain: '.mp.weixin.qq.com', path: '/', expires: 0 },
+    ]);
+
+    expect(page.setCookie).toHaveBeenCalledWith({
+      name: 'token',
+      value: 'x',
+      domain: '.mp.weixin.qq.com',
+      path: '/',
+      // expires should be omitted for session cookie
+    });
+  });
+
+  it('should omit expires when cookie has negative expires', async () => {
+    const page = makePage();
+    page.evaluate.mockResolvedValue(true);
+    const browser = makeBrowser(page);
+    (puppeteer.launch as jest.Mock).mockResolvedValue(browser);
+    const service = new ChromeCDPService(mockOutputChannel, '/tmp/multipost');
+
+    await service.startAuthenticatedSession([
+      { name: 'token', value: 'x', domain: '.mp.weixin.qq.com', path: '/', expires: -12345 },
+    ]);
+
+    expect(page.setCookie).toHaveBeenCalledWith({
+      name: 'token',
+      value: 'x',
+      domain: '.mp.weixin.qq.com',
+      path: '/',
+      // expires should be omitted
+    });
+  });
+
+  it('should skip failed cookies but continue with successful ones', async () => {
+    const page = makePage();
+    page.evaluate.mockResolvedValue(true);
+    // First cookie fails, second succeeds
+    page.setCookie
+      .mockRejectedValueOnce(new Error('Protocol error: Invalid cookie fields'))
+      .mockResolvedValueOnce(undefined);
+    const browser = makeBrowser(page);
+    (puppeteer.launch as jest.Mock).mockResolvedValue(browser);
+    const service = new ChromeCDPService(mockOutputChannel, '/tmp/multipost');
+
+    await service.startAuthenticatedSession([
+      { name: 'badCookie', value: 'x', domain: '.mp.weixin.qq.com', path: '/' },
+      { name: 'goodCookie', value: 'y', domain: '.mp.weixin.qq.com', path: '/' },
+    ]);
+
+    // Should have tried both cookies, one failed one succeeded
+    expect(page.setCookie).toHaveBeenCalledTimes(2);
+    // Should still complete successfully because at least some succeeded
+    expect(service.isSessionActive()).toBe(true);
+  });
+
+  it('should throw when all cookies fail to set', async () => {
+    const page = makePage();
+    page.evaluate.mockResolvedValue(true);
+    // All cookies fail
+    page.setCookie.mockRejectedValue(new Error('Protocol error: Invalid cookie fields'));
+    const browser = makeBrowser(page);
+    (puppeteer.launch as jest.Mock).mockResolvedValue(browser);
+    const service = new ChromeCDPService(mockOutputChannel, '/tmp/multipost');
+
+    await expect(service.startAuthenticatedSession([
+      { name: 'bad1', value: 'x', domain: '.mp.weixin.qq.com', path: '/' },
+      { name: 'bad2', value: 'y', domain: '.mp.weixin.qq.com', path: '/' },
+    ])).rejects.toThrow('All 2 cookies failed to set');
   });
 });

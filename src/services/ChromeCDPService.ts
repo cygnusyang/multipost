@@ -6,6 +6,8 @@
 import puppeteer from 'puppeteer';
 import type { Browser, Page, CookieParam } from 'puppeteer';
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
 
 const LOGIN_TIMEOUT_MS = 120000; // 2 minutes timeout for user to scan QR
 const POLL_INTERVAL_MS = 2000; // Check every 2 seconds for login completion
@@ -14,9 +16,12 @@ export class ChromeCDPService {
   private outputChannel: vscode.OutputChannel;
   private browser: Browser | null = null;
   private authenticatedPage: Page | null = null;
+  private userDataDir: string;
 
-  constructor(outputChannel: vscode.OutputChannel) {
+  constructor(outputChannel: vscode.OutputChannel, storagePath: string) {
     this.outputChannel = outputChannel;
+    this.userDataDir = path.join(storagePath, 'chrome-profile');
+    fs.mkdirSync(this.userDataDir, { recursive: true });
   }
 
   private log(message: string, level: 'info' | 'error' | 'warn' = 'info'): void {
@@ -37,16 +42,7 @@ export class ChromeCDPService {
   async startFirstTimeLogin(): Promise<CookieParam[]> {
     this.log('Starting first-time login flow');
 
-    const browser = await puppeteer.launch({
-      headless: false,
-      defaultViewport: null,
-      args: [
-        '--start-maximized',
-        '--no-first-run',
-        '--no-default-browser-check',
-      ],
-    });
-
+    const browser = await this.launchBrowser();
     this.browser = browser;
 
     try {
@@ -87,6 +83,21 @@ export class ChromeCDPService {
     }
   }
 
+  private async launchBrowser(): Promise<Browser> {
+    return await puppeteer.launch({
+      headless: false,
+      defaultViewport: null,
+      userDataDir: this.userDataDir,
+      args: [
+        '--start-maximized',
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--disable-crashpad',
+        '--disable-breakpad',
+      ],
+    });
+  }
+
   /**
    * Start an authenticated session with existing cookies from local storage
    * @param cookies Array of full CookieParam objects extracted from Chrome
@@ -123,24 +134,30 @@ export class ChromeCDPService {
 
     this.log(`Filtered to ${validCookies.length} valid cookies out of ${cookies.length} total`);
 
-    this.browser = await puppeteer.launch({
-      headless: false,
-      defaultViewport: null,
-      args: [
-        '--start-maximized',
-        '--no-first-run',
-        '--no-default-browser-check',
-      ],
-    });
+    this.browser = await this.launchBrowser();
 
     try {
       const page = await this.browser.newPage();
 
-      // Set cookies before navigating
+      // Set cookies before navigating - set one by one with individual error handling
+      // If a cookie fails, just log and skip it (inspired by automation/buying scripts)
+      let successCount = 0;
+      let failCount = 0;
       for (const cookie of validCookies) {
-        await page.setCookie(cookie);
+        try {
+          await page.setCookie(cookie);
+          successCount++;
+        } catch (error) {
+          failCount++;
+          this.log(`Failed to set cookie "${cookie.name}", skipping it. Error: ${error}`, 'warn');
+        }
       }
-      this.log(`Injected ${validCookies.length} cookies into browser`);
+      this.log(`Cookie injection complete: ${successCount} succeeded, ${failCount} failed`);
+
+      // Only fail if all cookies failed
+      if (successCount === 0 && failCount > 0) {
+        throw new Error(`All ${failCount} cookies failed to set. Cannot proceed with authentication.`);
+      }
 
       await page.goto('https://mp.weixin.qq.com/', {
         waitUntil: 'networkidle2',
@@ -200,13 +217,18 @@ export class ChromeCDPService {
       normalized.httpOnly = cookie.httpOnly;
     }
 
-    if (cookie.sameSite === 'Strict' || cookie.sameSite === 'Lax' || cookie.sameSite === 'None') {
-      normalized.sameSite = cookie.sameSite;
+    // sameSite - only accept exact valid values
+    const validSameSiteValues = ['Strict', 'Lax', 'None'] as const;
+    if (typeof cookie.sameSite === 'string' && validSameSiteValues.includes(cookie.sameSite as any)) {
+      normalized.sameSite = cookie.sameSite as any;
     }
+    // else: omit entirely
 
+    // expires - only add if it's a positive finite number (0 = session cookie, omit)
     if (typeof cookie.expires === 'number' && Number.isFinite(cookie.expires) && cookie.expires > 0) {
       normalized.expires = cookie.expires;
     }
+    // else: omit entirely
 
     return normalized;
   }
