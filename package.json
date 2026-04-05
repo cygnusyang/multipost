@@ -1,6 +1,88 @@
 {
+  "name": "multipost",
+  "displayName": "MultiPost - WeChat Publisher",
+  "description": "Publish Markdown directly to WeChat Official Accounts from VSCode",
+  "version": "0.1.6",
+  "publisher": "cygnus",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other",
+    "Markdown"
+  ],
+  "activationEvents": [
+    "onLanguage:markdown",
+    "onCommand:wechat-publisher.preview",
+    "onCommand:wechat-publisher.loginWeChat",
+    "onCommand:wechat-publisher.logoutWeChat",
+    "onCommand:wechat-publisher.uploadToWeChat"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "wechat-publisher.preview",
+        "title": "Preview WeChat Format",
+        "icon": {
+          "light": "media/icons/preview-light.svg",
+          "dark": "media/icons/preview-dark.svg"
+        }
+      },
+      {
+        "command": "wechat-publisher.uploadToWeChat",
+        "title": "Upload to WeChat Official Accounts",
+        "icon": {
+          "light": "media/icons/upload-light.svg",
+          "dark": "media/icons/upload-dark.svg"
+        }
+      },
+      {
+        "command": "wechat-publisher.loginWeChat",
+        "title": "Login WeChat Official Accounts"
+      },
+      {
+        "command": "wechat-publisher.logoutWeChat",
+        "title": "Logout WeChat Official Accounts"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile && npm run build:webview",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "build:webview": "cd webview-src && vite build",
+    "dev:webview": "cd webview-src && vite dev",
+    "test": "jest",
+    "test:coverage": "jest --coverage --coverageReporters=json-summary"
+  },
   "dependencies": {
-    "form-data": "^4.0.5",
-    "node-fetch": "^3.3.2"
+    "antd": "^5.12.2",
+    "canvas": "^3.2.3",
+    "jsdom": "^29.0.1",
+    "mermaid": "^10.9.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "rehype-highlight": "^7.0.0",
+    "rehype-stringify": "^10.0.0",
+    "remark-gfm": "^4.0.0",
+    "remark-parse": "^11.0.0",
+    "remark-rehype": "^11.1.0",
+    "unified": "^11.0.4"
+  },
+  "devDependencies": {
+    "@types/form-data": "^2.2.1",
+    "@types/jest": "^30.0.0",
+    "@types/jsdom": "^28.0.1",
+    "@types/node": "^20.10.0",
+    "@types/node-fetch": "^2.6.13",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@types/vscode": "^1.80.0",
+    "@vitejs/plugin-react": "^4.2.1",
+    "jest": "^30.3.0",
+    "ts-jest": "^29.4.9",
+    "typescript": "^5.9.3",
+    "vite": "^5.0.8"
   }
 }

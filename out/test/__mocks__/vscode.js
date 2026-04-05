@@ -1,0 +1,56 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.SecretStorage = exports.ViewColumn = exports.Uri = exports.env = exports.window = exports.commands = exports.workspace = void 0;
+exports.workspace = {
+    getConfiguration: jest.fn(() => ({
+        get: jest.fn((key, defaultValue) => defaultValue),
+    })),
+};
+exports.commands = {
+    registerCommand: jest.fn(),
+    executeCommand: jest.fn(),
+};
+exports.window = {
+    showErrorMessage: jest.fn(),
+    showInformationMessage: jest.fn(),
+    showWarningMessage: jest.fn(),
+    withProgress: jest.fn((_, cb) => cb()),
+    createWebviewPanel: jest.fn(() => {
+        return {
+            webview: {
+                html: '',
+                postMessage: jest.fn(),
+                asWebviewUri: jest.fn((uri) => uri),
+            },
+            reveal: jest.fn(),
+            onDidDispose: jest.fn(),
+        };
+    }),
+    activeTextEditor: undefined,
+};
+exports.env = {
+    openExternal: jest.fn(),
+    clipboard: {
+        writeText: jest.fn(),
+    },
+};
+exports.Uri = {
+    file: jest.fn((path) => ({ scheme: 'file', path })),
+    joinPath: jest.fn(),
+    parse: jest.fn(),
+};
+var ViewColumn;
+(function (ViewColumn) {
+    ViewColumn[ViewColumn["Beside"] = -2] = "Beside";
+    ViewColumn[ViewColumn["One"] = 1] = "One";
+    ViewColumn[ViewColumn["Two"] = 2] = "Two";
+})(ViewColumn || (exports.ViewColumn = ViewColumn = {}));
+class SecretStorage {
+    constructor() {
+        this.get = jest.fn();
+        this.store = jest.fn();
+        this.delete = jest.fn();
+    }
+}
+exports.SecretStorage = SecretStorage;
+//# sourceMappingURL=vscode.js.map

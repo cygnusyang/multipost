@@ -1,0 +1,71 @@
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+const vscode = __importStar(require("vscode"));
+const SettingsService_1 = require("./SettingsService");
+// Mock vscode workspace
+jest.mock('vscode', () => ({
+    workspace: {
+        getConfiguration: jest.fn(() => ({
+            get: jest.fn((key, defaultValue) => defaultValue),
+        })),
+    },
+}));
+describe('SettingsService', () => {
+    let mockContext = {};
+    let settingsService;
+    beforeEach(() => {
+        mockContext = {};
+        settingsService = new SettingsService_1.SettingsService(mockContext);
+        jest.clearAllMocks();
+    });
+    it('should create instance without error', () => {
+        expect(settingsService).toBeDefined();
+    });
+    it('should return default author when not configured', () => {
+        const result = settingsService.getDefaultAuthor();
+        expect(result).toBe('');
+    });
+    it('should return default autoOpenDraft setting', () => {
+        const result = settingsService.shouldAutoOpenDraft();
+        expect(result).toBe(true);
+    });
+    it('should get settings from configuration', () => {
+        const mockGet = jest.spyOn(vscode.workspace, 'getConfiguration');
+        settingsService.getSettings();
+        expect(mockGet).toHaveBeenCalledWith('wechatPublisher');
+    });
+});
+//# sourceMappingURL=SettingsService.test.js.map
