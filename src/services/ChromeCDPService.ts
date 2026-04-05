@@ -135,7 +135,15 @@ export class ChromeCDPService {
 
     this.log(`Filtered to ${validCookies.length} valid cookies out of ${cookies.length} total`);
 
-    this.browser = await this.launchBrowser();
+    this.browser = await puppeteer.launch({
+      headless: false,
+      defaultViewport: null,
+      args: [
+        '--start-maximized',
+        '--no-first-run',
+        '--no-default-browser-check',
+      ],
+    });
 
     try {
       const page = await this.browser.newPage();
