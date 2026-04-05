@@ -1,5 +1,12 @@
 # Change Log
 
+## 0.1.3 (2026-04-05)
+
+- 🐛 Fix: missing dependencies in VSIX package
+- 📦 Fixed .vscodeignore to include node_modules dependencies
+- ⬆️ Upgrade canvas to v3.2.3 to resolve peer dependency conflict with jsdom
+- 🏷️ Bump version to 0.1.3
+
 ## 0.1.2 (2026-04-05)
 
 - 📝 Add README.md

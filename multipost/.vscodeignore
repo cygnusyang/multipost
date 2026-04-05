@@ -1,6 +1,9 @@
 out/**/*.map
-node_modules/**
-!.node_modules/canvas/build/Release/**
+# Only ignore dev stuff in node_modules
+# vsce automatically includes only dependencies from package.json
+node_modules/.bin/
+node_modules/.cache/
+node_modules/*/node_modules/
 webview-src/**
 !media/webview/**
 .vscode/**
@@ -10,5 +13,4 @@ webview-src/**
 .gitignore
 *.log
 yarn.lock
-package-lock.json
 pnpm-lock.yaml
