@@ -19,7 +19,7 @@ export class ChromeCDPService {
     this.outputChannel = outputChannel;
   }
 
-  private log(message: string, level: 'info' | 'error' = 'info'): void {
+  private log(message: string, level: 'info' | 'error' | 'warn' = 'info'): void {
     const timestamp = new Date().toISOString();
     const logMessage = `[${timestamp}] [CDP] [${level.toUpperCase()}] ${message}`;
     this.outputChannel.appendLine(logMessage);
@@ -123,18 +123,26 @@ export class ChromeCDPService {
     // Parse cookie strings into Puppeteer CookieParam objects
     // expires: set to 1 year from now to keep the cookie valid for a long time
     const oneYearFromNow = Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60;
-    const cookies: CookieParam[] = cookieStrings.map(cookieStr => {
-      const [name, value] = cookieStr.split('=', 2);
-      return {
-        name,
-        value,
-        domain: '.mp.weixin.qq.com',
-        path: '/',
-        expires: oneYearFromNow,
-        httpOnly: false,
-        secure: true,
-      };
-    });
+    const cookies: CookieParam[] = cookieStrings
+      .map(cookieStr => {
+        const [name, value] = cookieStr.split('=', 2);
+        // Skip invalid cookies that don't have name=value format
+        if (!name || value === undefined) {
+          this.log(`Skipping invalid cookie: ${cookieStr}`, 'warn');
+          return null;
+        }
+        return {
+          name,
+          value,
+          domain: '.mp.weixin.qq.com',
+          path: '/',
+          expires: oneYearFromNow,
+          httpOnly: false,
+          secure: true,
+          sameSite: 'Lax',
+        } as CookieParam;
+      })
+      .filter((cookie): cookie is CookieParam => cookie !== null);
 
     this.browser = await puppeteer.launch({
       headless: false,
