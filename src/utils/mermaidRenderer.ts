@@ -1,11 +1,5 @@
-import { createCanvas } from 'canvas';
-import { JSDOM } from 'jsdom';
-
-// mermaid requires a DOM environment, which we need to provide in Node.js
-// We'll dynamically initialize it only when needed
-
-let mermaidInstance: any;
-let mermaidInitialized = false;
+import fetch from 'node-fetch';
+import { Buffer } from 'buffer';
 
 function log(message: string, level: 'info' | 'error' | 'warn' = 'info'): void {
   const timestamp = new Date().toISOString();
@@ -17,192 +11,75 @@ function log(message: string, level: 'info' | 'error' | 'warn' = 'info'): void {
   }
 }
 
-// Polyfill for text.getBBox() method which is not implemented in JSDOM
-function addGetBBoxPolyfill() {
-  const originalSVGTextElement = global.window.SVGTextElement;
-  if (originalSVGTextElement && !originalSVGTextElement.prototype.getBBox) {
-    originalSVGTextElement.prototype.getBBox = function() {
-      return {
-        x: 0,
-        y: 0,
-        width: 0,
-        height: 0,
-        left: 0,
-        right: 0,
-        top: 0,
-        bottom: 0,
-        toJSON: () => ({
-          x: 0,
-          y: 0,
-          width: 0,
-          height: 0,
-          left: 0,
-          right: 0,
-          top: 0,
-          bottom: 0,
-        }),
-      } as unknown as DOMRect;
-    };
-  }
+/**
+ * Mermaid diagram types for identification
+ */
+const mermaidTypes = [
+  'erDiagram',
+  'graph TD',
+  'graph LR',
+  'graph RL',
+  'graph BT',
+  'flowchart TD',
+  'flowchart LR',
+  'flowchart RL',
+  'flowchart BT',
+  'sequenceDiagram',
+  'classDiagram',
+  'stateDiagram',
+  'stateDiagram-v2',
+  'pie title',
+  'gantt'
+];
 
-  const originalSVGTSpanElement = global.window.SVGTSpanElement;
-  if (originalSVGTSpanElement && !originalSVGTSpanElement.prototype.getBBox) {
-    originalSVGTSpanElement.prototype.getBBox = function() {
-      return {
-        x: 0,
-        y: 0,
-        width: 0,
-        height: 0,
-        left: 0,
-        right: 0,
-        top: 0,
-        bottom: 0,
-        toJSON: () => ({
-          x: 0,
-          y: 0,
-          width: 0,
-          height: 0,
-          left: 0,
-          right: 0,
-          top: 0,
-          bottom: 0,
-        }),
-      } as unknown as DOMRect;
-    };
-  }
-
-  // Add polyfill for other SVG elements if needed
-  const svgElementTypes = [
-    'SVGCircleElement',
-    'SVGEllipseElement',
-    'SVGLineElement',
-    'SVGPathElement',
-    'SVGPolygonElement',
-    'SVGPolylineElement',
-    'SVGRectElement',
-    'SVGSVGElement',
-  ];
-
-  svgElementTypes.forEach(type => {
-    const elementConstructor = (global.window as any)[type];
-    if (elementConstructor && !elementConstructor.prototype.getBBox) {
-      elementConstructor.prototype.getBBox = function() {
-        return {
-          x: 0,
-          y: 0,
-          width: 0,
-          height: 0,
-          left: 0,
-          right: 0,
-          top: 0,
-          bottom: 0,
-          toJSON: () => ({
-            x: 0,
-            y: 0,
-            width: 0,
-            height: 0,
-            left: 0,
-            right: 0,
-            top: 0,
-            bottom: 0,
-          }),
-        } as unknown as DOMRect;
-      };
-    }
-  });
+/**
+ * Check if the given text is a Mermaid diagram
+ */
+function isMermaidDiagram(text: string): boolean {
+  const trimmed = text.trim();
+  return mermaidTypes.some(type => trimmed.startsWith(type));
 }
 
-async function initMermaid(): Promise<void> {
-  if (mermaidInitialized) {
-    log('Mermaid already initialized');
-    return;
-  }
-
-  log('Starting mermaid initialization...');
-  try {
-    // Create a full DOM environment with jsdom
-    log('Creating JSDOM environment...');
-    const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>');
-    global.window = dom.window as any;
-    global.document = dom.window.document;
-    // 不直接设置 global.navigator，而是使用 Object.defineProperty 来避免只读属性错误
-    Object.defineProperty(global, 'navigator', {
-      value: dom.window.navigator,
-      configurable: true,
-      writable: true
-    });
-    log('JSDOM global objects set up');
-
-    // Add polyfill for getBBox() method which is not implemented in JSDOM
-    addGetBBoxPolyfill();
-    log('getBBox() polyfill added');
-
-    // Dynamic import after DOM is ready
-    log('Dynamically importing mermaid module...');
-    const mermaidModule = await import('mermaid');
-    mermaidInstance = mermaidModule.default;
-    const mermaidVersion = (mermaidModule as any).version || (mermaidModule.default as any)?.version || 'unknown';
-    log(`Mermaid module imported: version ${mermaidVersion}`);
-
-    mermaidInstance.initialize({
-      startOnLoad: false,
-      theme: 'default',
-      flowchart: {
-        useMaxWidth: true,
-      },
-    });
-    log('Mermaid initialized successfully');
-
-    mermaidInitialized = true;
-  } catch (error) {
-    log(`Mermaid initialization failed: ${(error as Error).message}`, 'error');
-    if (error instanceof Error && error.stack) {
-      log(`Stack: ${error.stack}`, 'error');
-    }
-    throw error;
-  }
-}
-
+/**
+ * Render Mermaid diagram using mermaid.ink service
+ */
 export async function renderMermaidToBuffer(code: string): Promise<Buffer> {
   log(`Rendering mermaid diagram, code length: ${code.length} characters`);
-  await initMermaid();
+
+  // Check if it's a valid Mermaid diagram
+  if (!isMermaidDiagram(code)) {
+    log(`Not a valid Mermaid diagram: ${code.substring(0, 30)}...`, 'error');
+    throw new Error('Invalid Mermaid diagram');
+  }
+
   try {
-    // Get SVG from mermaid
-    log('Calling mermaid.render...');
-    const { svg } = await mermaidInstance.render('mermaid-diagram', code);
-    log(`Mermaid render complete, SVG length: ${svg.length} characters`);
+    // Encode Mermaid code for API call
+    const encodedCode = Buffer.from(code).toString('base64');
+    log(`Encoded Mermaid code: ${encodedCode.substring(0, 50)}...`);
 
-    // Calculate dimensions
-    const viewBoxMatch = svg.match(/viewBox="[\d.\s-]+"/);
-    let width = 800;
-    let height = 600;
+    // Build the mermaid.ink URL
+    const mermaidUrl = `https://mermaid.ink/img/${encodedCode}`;
+    log(`Requesting Mermaid diagram from: ${mermaidUrl}`);
 
-    if (viewBoxMatch) {
-      const parts = viewBoxMatch[0].replace('viewBox="', '').replace('"', '').split(' ').map(Number);
-      if (parts.length === 4) {
-        width = Math.ceil(parts[2]);
-        height = Math.ceil(parts[3]);
-      }
+    // Make API call to render diagram
+    const response = await fetch(mermaidUrl);
+
+    if (!response) {
+      log('No response received from Mermaid.ink API', 'error');
+      throw new Error('No response from Mermaid API');
     }
 
-    // Add padding
-    width += 40;
-    height += 40;
-    log(`Calculated dimensions: ${width}x${height}`);
+    if (!response.ok) {
+      log(`Mermaid.ink API returned error status: ${response.status}`, 'error');
+      throw new Error(`Mermaid API failed with status ${response.status}`);
+    }
 
-    // Create canvas and draw SVG
-    log(`Creating canvas: ${width}x${height}`);
-    const canvas = createCanvas(width, height);
-    const ctx = canvas.getContext('2d');
+    // Get the image data
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    log(`Mermaid diagram rendered successfully, buffer size: ${buffer.length} bytes`);
 
-    // Fill white background
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, width, height);
-
-    // Convert SVG to PNG buffer
-    const pngBuffer = canvas.toBuffer('image/png');
-    log(`PNG buffer generated: ${pngBuffer.length} bytes`);
-    return pngBuffer;
+    return buffer;
   } catch (error) {
     log(`Mermaid render error: ${(error as Error).message}`, 'error');
     if (error instanceof Error && error.stack) {

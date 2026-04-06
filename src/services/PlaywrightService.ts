@@ -51,6 +51,28 @@ export class PlaywrightService {
       const page = await browser.newPage();
       this.log('New page opened, navigating to mp.weixin.qq.com');
 
+      // 添加网络监听，查看网页返回的数据
+      page.on('response', async (response) => {
+        // 过滤微信API请求
+        if (response.url().includes('cgi-bin') && response.url().includes('mp.weixin.qq.com')) {
+          this.log(`[DEBUG] API Response: ${response.url()} - ${response.status()}`, 'info');
+          try {
+            // 尝试获取响应内容
+            if (response.headers()['content-type']?.includes('application/json')) {
+              const jsonData = await response.json();
+              this.log(`[DEBUG] JSON Response: ${JSON.stringify(jsonData)}`, 'info');
+            } else {
+              const textData = await response.text();
+              if (textData.length < 500) { // 只记录较短的响应内容
+                this.log(`[DEBUG] Text Response: ${textData}`, 'info');
+              }
+            }
+          } catch (error) {
+            this.log(`[DEBUG] Failed to parse response: ${error}`, 'warn');
+          }
+        }
+      });
+
       await page.goto('https://mp.weixin.qq.com/', {
         waitUntil: 'networkidle',
       });
@@ -192,6 +214,7 @@ export class PlaywrightService {
 
       this.log('[DEBUG] Step 5: Clicking "New Creation"');
       await page.getByText('新的创作').click();
+      await page.waitForLoadState('networkidle', { timeout: 60000 });
 
       this.log('[DEBUG] Step 6: Clicking "Write New Article"');
       let page1: Page;
@@ -209,52 +232,67 @@ export class PlaywrightService {
         this.log('[DEBUG] Step 6: New page opened for article editing');
         await page1.waitForLoadState('networkidle', { timeout: 60000 });
         this.authenticatedPage = page1; // 更新为新页面
+
+        // 获取并分析新页面的 HTML 内容，以便确定元素定位策略
+        const pageHTML = await this.authenticatedPage.content();
+        this.log(`[DEBUG] New page HTML length: ${pageHTML.length}`);
+
+        // 分析页面结构，查找关键元素
+        if (pageHTML.includes('edui1_contentplaceholder')) {
+          this.log('[DEBUG] Page contains edui1_contentplaceholder');
+        }
+        if (pageHTML.includes('从这里开始写正文')) {
+          this.log('[DEBUG] Page contains "从这里开始写正文" placeholder');
+        }
+        if (pageHTML.includes('请在这里输入标题')) {
+          this.log('[DEBUG] Page contains "请在这里输入标题" input');
+        }
       }
 
-      // Step 7: Fill in the form
-      this.log('[DEBUG] Step 7: Filling in article details');
+      // Step 7: Fill in the form based on page structure
+      this.log('[DEBUG] Step 7: Filling in article details based on page structure');
 
       // Fill title
-      const titleSelector = this.authenticatedPage.getByRole('textbox', { name: '请在这里输入标题' });
-      await titleSelector.waitFor({ timeout: 60000 });
-      await titleSelector.click();
-      await titleSelector.fill(title);
+      this.log('[DEBUG] Step 7a: Filling title');
+      try {
+        const titleSelector = this.authenticatedPage.getByRole('textbox', { name: '请在这里输入标题' });
+        await titleSelector.waitFor({ timeout: 60000 });
+        await titleSelector.click();
+        await titleSelector.fill(title);
+        this.log(`[DEBUG] Title filled: "${title}"`);
+      } catch (error) {
+        this.log(`[DEBUG] Failed to fill title: ${error}`, 'error');
+        throw error;
+      }
 
       // Fill author
-      const authorSelector = this.authenticatedPage.getByRole('textbox', { name: '请输入作者' });
-      await authorSelector.waitFor({ timeout: 60000 });
-      await authorSelector.click();
-      await authorSelector.fill(author);
+      this.log('[DEBUG] Step 7b: Filling author');
+      await this.fillAuthorField(author);
 
       // Fill content
       this.log('[DEBUG] Step 8: Filling content');
-      await this.authenticatedPage.locator('section').click();
-      const contentSelector = this.authenticatedPage.locator('div').filter({ hasText: /^从这里开始写正文$/ });
-      await contentSelector.waitFor({ timeout: 60000 });
-      await contentSelector.fill(content);
+      await this.fillContentField(content);
 
       // Fill digest if provided
       if (digest) {
         this.log('[DEBUG] Step 9: Filling digest');
-        try {
-          const digestSelector = this.authenticatedPage.getByRole('textbox', { name: '请输入摘要' });
-          await digestSelector.waitFor({ timeout: 30000 });
-          await digestSelector.click();
-          await digestSelector.fill(digest);
-        } catch (error) {
-          this.log(`[DEBUG] Digest field not found: ${error}`, 'warn');
-        }
+        await this.fillDigestField(digest);
       }
 
       // Save as draft
       this.log('[DEBUG] Step 10: Saving as draft');
-      const saveButton = this.authenticatedPage.getByRole('button', { name: '保存为草稿' });
-      await saveButton.waitFor({ timeout: 60000 });
+      try {
+        const saveButton = this.authenticatedPage.getByRole('button', { name: '保存为草稿' });
+        await saveButton.waitFor({ timeout: 60000 });
 
-      // 点击保存按钮并等待导航完成
-      const navigationPromise = this.authenticatedPage.waitForLoadState('networkidle', { timeout: 60000 });
-      await saveButton.click();
-      await navigationPromise;
+        // 点击保存按钮并等待导航完成
+        const navigationPromise = this.authenticatedPage.waitForLoadState('networkidle', { timeout: 60000 });
+        await saveButton.click();
+        await navigationPromise;
+      } catch (error) {
+        this.log(`[DEBUG] Failed to save draft: ${error}`, 'error');
+        throw error;
+      }
 
       const draftUrl = this.authenticatedPage.url();
       this.log(`[DEBUG] Draft created successfully: ${draftUrl}`);
@@ -266,6 +304,130 @@ export class PlaywrightService {
     } catch (error) {
       this.log(`[DEBUG] Error creating draft: ${error}`, 'error');
       throw error;
+    }
+  }
+
+  /**
+   * Fill author field with robust locator strategy
+   */
+  private async fillAuthorField(author: string): Promise<void> {
+    try {
+      this.log(`[DEBUG] Trying to fill author: "${author}"`);
+      const authorSelector = this.authenticatedPage!.getByRole('textbox', { name: '请输入作者' });
+
+      await authorSelector.waitFor({ timeout: 30000 });
+
+      // 使用与参考脚本相同的方法：先点击，再使用 Tab 键，最后填充
+      await authorSelector.click();
+      await authorSelector.press('Tab');
+
+      // 填充作者名称
+      await authorSelector.fill(author);
+      this.log(`[DEBUG] Author filled: "${author}"`);
+    } catch (error) {
+      this.log(`[DEBUG] Failed to fill author with reference selector: ${error}`, 'warn');
+
+      // 备用策略：尝试其他定位方法
+      try {
+        const authorInputSelectors = [
+          this.authenticatedPage!.locator('input[name="author"]'),
+          this.authenticatedPage!.locator('input[type="text"]').filter({ hasText: '请输入作者' }),
+          this.authenticatedPage!.getByPlaceholder('请输入作者')
+        ];
+
+        let authorFilled = false;
+        for (const selector of authorInputSelectors) {
+          try {
+            await selector.waitFor({ timeout: 10000 });
+            await selector.click();
+            await selector.fill(author);
+            this.log(`[DEBUG] Author filled with fallback selector: "${author}"`);
+            authorFilled = true;
+            break;
+          } catch (fallbackError) {
+            this.log(`[DEBUG] Fallback selector failed: ${fallbackError}`, 'warn');
+          }
+        }
+
+        if (!authorFilled) {
+          this.log('[DEBUG] Author field not found, skipping', 'warn');
+        }
+      } catch (fallbackError) {
+        this.log(`[DEBUG] Fallback strategies also failed: ${fallbackError}`, 'error');
+      }
+    }
+  }
+
+  /**
+   * Fill content field with robust locator strategy
+   */
+  private async fillContentField(content: string): Promise<void> {
+    try {
+      // 使用与参考脚本相同的定位策略
+      this.log('[DEBUG] Trying to fill content with reference script selector');
+
+      // 首先点击 section 元素来确保编辑器区域获得焦点（参考 Python 脚本）
+      await this.authenticatedPage!.locator('section').click();
+
+      // 使用与 Python 脚本完全相同的选择器：div 元素包含精确文本 "从这里开始写正文"
+      const contentSelector = this.authenticatedPage!.locator('div').filter({ hasText: /^从这里开始写正文$/ });
+
+      await contentSelector.waitFor({ timeout: 30000 });
+
+      // 点击以激活编辑器
+      await contentSelector.click();
+
+      // 填充内容
+      await contentSelector.fill(content);
+
+      this.log(`[DEBUG] Content filled successfully, length: ${content.length} characters`);
+    } catch (error) {
+      this.log(`[DEBUG] Failed to fill content with reference selector: ${error}`, 'warn');
+
+      // 备用策略：尝试其他定位方法
+      try {
+        this.log('[DEBUG] Trying fallback selectors');
+        const fallbackSelectors = [
+          this.authenticatedPage!.locator('#edui1_contentplaceholder'),
+          this.authenticatedPage!.locator('.editor_content_placeholder'),
+          this.authenticatedPage!.getByText('从这里开始写正文'),
+          this.authenticatedPage!.frameLocator('iframe').locator('body')
+        ];
+
+        let contentFilled = false;
+        for (const selector of fallbackSelectors) {
+          try {
+            await selector.waitFor({ timeout: 10000 });
+            await selector.click();
+            await selector.fill(content);
+            this.log(`[DEBUG] Content filled with fallback selector: ${content.length} characters`);
+            contentFilled = true;
+            break;
+          } catch (fallbackError) {
+            this.log(`[DEBUG] Fallback selector failed: ${fallbackError}`, 'warn');
+          }
+        }
+
+        if (!contentFilled) {
+          this.log('[DEBUG] All content selectors failed, skipping', 'warn');
+        }
+      } catch (fallbackError) {
+        this.log(`[DEBUG] Fallback strategies also failed: ${fallbackError}`, 'error');
+      }
+    }
+  }
+
+  /**
+   * Fill digest field with robust locator strategy
+   */
+  private async fillDigestField(digest: string): Promise<void> {
+    try {
+      const digestSelector = this.authenticatedPage!.getByRole('textbox', { name: '请输入摘要' });
+      await digestSelector.waitFor({ timeout: 30000 });
+      await digestSelector.click();
+      await digestSelector.fill(digest);
+    } catch (error) {
+      this.log(`[DEBUG] Digest field not found: ${error}`, 'warn');
     }
   }
 

@@ -1,5 +1,11 @@
 # Change Log
 
+## 0.5.7 (2026-04-06)
+
+- 🐛 Fix: Article content field filling - improved selector strategy to match WeChat Official Accounts' new interface
+- 🐛 Fix: Author field filling - updated to use the same strategy as Python reference script
+- 🐛 Fix: Mermaid renderer - added null check for API response to handle network errors gracefully
+
 ## 0.5.6 (2026-04-06)
 
 - 🎉 Major refactor: **Remove CDP mode and use Playwright as default**
