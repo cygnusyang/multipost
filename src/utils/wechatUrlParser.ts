@@ -173,7 +173,7 @@ export class WeChatUrlParser {
    */
   async extractContentListUrl(): Promise<string> {
     const baseUrl = this.getBaseUrl();
-    
+
     const contentLink = await this.page.evaluate(() => {
       const possibleSelectors = [
         'a[href*="action=list"]',
@@ -182,7 +182,7 @@ export class WeChatUrlParser {
         'a:contains("图文消息")',
         'a[title*="内容"]',
       ];
-      
+
       for (const selector of possibleSelectors) {
         const element = document.querySelector(selector);
         if (element && element.getAttribute('href')) {
@@ -192,7 +192,7 @@ export class WeChatUrlParser {
       return null;
     });
 
-    if (contentLink) {
+    if (typeof contentLink === 'string') {
       if (contentLink.startsWith('/')) {
         return `${baseUrl}${contentLink}`;
       }

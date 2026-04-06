@@ -282,7 +282,9 @@ export class ChromeCDPService {
 
       // Step 3: get token from URL/window context and go to appmsg list page (draft entry page)
       const token = await this.extractTokenFromPage(page);
-      const listUrl = `https://mp.weixin.qq.com/cgi-bin/appmsg?action=list&type=10&begin=0&count=10&lang=zh_CN&token=${encodeURIComponent(token)}`;
+      // 使用动态URL解析器获取列表URL
+      const urlParser = new WeChatUrlParser(page);
+      const listUrl = await urlParser.extractContentListUrl();
       this.log(`[DEBUG] Step 3: Navigating to appmsg list: ${listUrl}`);
       await page.goto(listUrl, { waitUntil: 'networkidle2' });
       this.log(`[DEBUG] Step 3 complete: ${page.url()}`);
@@ -300,7 +302,9 @@ export class ChromeCDPService {
         await this.waitForPotentialNavigation(page);
       } else {
         this.log('[DEBUG] Create entry not found from list, falling back to direct editor URL (without appmsgid)');
-        const editorUrl = `https://mp.weixin.qq.com/cgi-bin/operate_appmsg?t=media/appmsg_edit&action=edit&type=77&lang=zh_CN&token=${encodeURIComponent(token)}`;
+        // 使用动态URL解析器获取编辑URL，不传递appmsgid让平台生成新ID
+        const editorUrl = await urlParser.extractEditUrl();
+        this.log(`[DEBUG] Using dynamic editor URL: ${editorUrl}`);
         await page.goto(editorUrl, { waitUntil: 'networkidle2' });
       }
 
