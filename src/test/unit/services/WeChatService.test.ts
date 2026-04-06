@@ -324,4 +324,246 @@ describe('WeChatService', () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain('invalid token');
   });
+
+  it('should convert old string[] cookies to CookieParam[] format', async () => {
+    const oldFormatAuth = {
+      token: 'test-token',
+      ticket: 'test-ticket',
+      userName: 'test-user',
+      nickName: 'Test User',
+      svrTime: 123456,
+      avatar: 'avatar-url',
+      cookies: ['cookie1=val1', 'cookie2=val2'] as any,
+    };
+
+    (mockSecretStorage.get as jest.Mock).mockResolvedValue(JSON.stringify(oldFormatAuth));
+
+    await weChatService.loadAuthFromStorage();
+    const authInfo = weChatService.getAuthInfo();
+
+    expect(authInfo).not.toBeNull();
+    expect(authInfo?.cookies).toHaveLength(2);
+    expect(authInfo?.cookies[0]).toMatchObject({
+      name: 'cookie1',
+      value: 'val1',
+      domain: '.mp.weixin.qq.com',
+    });
+    expect(authInfo?.cookies[1]).toMatchObject({
+      name: 'cookie2',
+      value: 'val2',
+      domain: '.mp.weixin.qq.com',
+    });
+  });
+
+  it('should filter out invalid cookies during conversion', async () => {
+    const oldFormatAuth = {
+      token: 'test-token',
+      ticket: 'test-ticket',
+      userName: 'test-user',
+      nickName: 'Test User',
+      svrTime: 123456,
+      avatar: 'avatar-url',
+      cookies: ['valid=val', 'invalid', '=value'] as any,
+    };
+
+    (mockSecretStorage.get as jest.Mock).mockResolvedValue(JSON.stringify(oldFormatAuth));
+
+    await weChatService.loadAuthFromStorage();
+    const authInfo = weChatService.getAuthInfo();
+
+    expect(authInfo).not.toBeNull();
+    expect(authInfo?.cookies).toHaveLength(1);
+    expect(authInfo?.cookies[0].name).toBe('valid');
+  });
+
+  it('should extract auth info using different token patterns', async () => {
+    const testCases = [
+      { html: 'token = "test-token"', pattern: 'token = "x"' },
+      { html: 'token: "test-token"', pattern: 'token: "x"' },
+      { html: 't = "test-token"', pattern: 't = "x"' },
+      { html: 't: "test-token"', pattern: 't: "x"' },
+      { html: 'token=test-token', pattern: 'token=x' },
+      { html: 'window.__TOKEN__ = "test-token"', pattern: 'window.__TOKEN__ = "x"' },
+    ];
+
+    for (const testCase of testCases) {
+      mockFetch.mockResolvedValue({
+        text: jest.fn().mockResolvedValue(`${testCase.html}\nticket_val: "test-ticket"\nuser_name: "test-user"\nnick_name: "Test User"\ntime: "123456"\nhead_img: "https://example.com/avatar.jpg"`),
+        headers: {
+          raw: jest.fn().mockReturnValue({ 'set-cookie': [] }),
+        },
+      });
+
+      const result = await weChatService.checkAuth();
+      expect(result.isAuthenticated).toBe(true);
+      expect(result.authInfo?.token).toBe('test-token');
+    }
+  });
+
+  it('should extract auth info when appMsgId is returned differently', async () => {
+    const mockAuth: WeChatAuthInfo = {
+      token: 'test-token',
+      ticket: 'test-ticket',
+      userName: 'test-user',
+      nickName: 'Test User',
+      svrTime: 123456,
+      avatar: 'avatar-url',
+      cookies: [makeCookie('cookie1', 'val')],
+    };
+
+    await weChatService.saveAuthInfo(mockAuth);
+    mockFetch.mockResolvedValue({
+      json: jest.fn().mockResolvedValue({
+        errmsg: 'ok',
+        appmsgid: '99',
+      }),
+    });
+
+    const result = await weChatService.createDraft('Title', 'Author', 'Content');
+    expect(result.success).toBe(true);
+    expect(result.draftUrl).toContain('appmsgid=99');
+  });
+
+  it('should handle various success response formats in createDraft', async () => {
+    const mockAuth: WeChatAuthInfo = {
+      token: 'test-token',
+      ticket: 'test-ticket',
+      userName: 'test-user',
+      nickName: 'Test User',
+      svrTime: 123456,
+      avatar: 'avatar-url',
+      cookies: [makeCookie('cookie1', 'val')],
+    };
+
+    await weChatService.saveAuthInfo(mockAuth);
+
+    const successFormats = [
+      { errmsg: 'ok' },
+      { base_resp: { ret: 0 } },
+      { base_resp: { err_msg: 'ok' } },
+      { ret: 0 },
+    ];
+
+    for (const format of successFormats) {
+      mockFetch.mockResolvedValue({
+        json: jest.fn().mockResolvedValue({
+          ...format,
+          appMsgId: '42',
+        }),
+      });
+
+      const result = await weChatService.createDraft('Title', 'Author', 'Content');
+      expect(result.success).toBe(true);
+    }
+  });
+
+  it('should parse cookies from set-cookie headers correctly', async () => {
+    mockFetch.mockResolvedValue({
+      text: jest.fn().mockResolvedValue('token: "test-token"\nticket: "test-ticket"\nuser_name: "test-user"\nnick_name: "Test User"\ntime: "123456"\nhead_img: "https://example.com/avatar.jpg"'),
+      headers: {
+        raw: jest.fn().mockReturnValue({
+          'set-cookie': [
+            'name1=value1; Path=/; Domain=.mp.weixin.qq.com; HttpOnly; Secure',
+            'name2=value2; Path=/; Secure',
+            'name3=value3',
+          ],
+        }),
+      },
+    });
+
+    const result = await weChatService.checkAuth();
+    expect(result.isAuthenticated).toBe(true);
+    expect(result.authInfo?.cookies).toHaveLength(3);
+    expect(result.authInfo?.cookies[0]).toMatchObject({
+      name: 'name1',
+      value: 'value1',
+      httpOnly: true,
+      secure: true,
+    });
+    expect(result.authInfo?.cookies[1]).toMatchObject({
+      name: 'name2',
+      value: 'value2',
+      httpOnly: false,
+      secure: true,
+    });
+    expect(result.authInfo?.cookies[2]).toMatchObject({
+      name: 'name3',
+      value: 'value3',
+      httpOnly: false,
+      secure: false,
+    });
+  });
+
+  it('should handle empty set-cookie headers', async () => {
+    mockFetch.mockResolvedValue({
+      text: jest.fn().mockResolvedValue('token: "test-token"\nticket: "test-ticket"\nuser_name: "test-user"\nnick_name: "Test User"\ntime: "123456"\nhead_img: "https://example.com/avatar.jpg"'),
+      headers: {
+        raw: jest.fn().mockReturnValue({}),
+      },
+    });
+
+    const result = await weChatService.checkAuth();
+    expect(result.isAuthenticated).toBe(true);
+    expect(result.authInfo?.cookies).toHaveLength(0);
+  });
+
+  it('should deduplicate cookies by name when combining', async () => {
+    mockFetch.mockResolvedValue({
+      status: 200,
+      statusText: 'OK',
+      text: jest.fn().mockResolvedValue('token: "test-token"\nticket: "test-ticket"\nuser_name: "test-user"\nnick_name: "Test User"\ntime: "123456"\nhead_img: "https://example.com/avatar.jpg"'),
+      headers: {
+        raw: jest.fn().mockReturnValue({ 'set-cookie': ['cookie1=new; HttpOnly', 'cookie2=val2'] }),
+      },
+    });
+
+    const result = await weChatService.checkAuthWithCookies(['cookie1=old', 'cookie2=val2', 'cookie3=val3']);
+
+    expect(result.isAuthenticated).toBe(true);
+    expect(result.authInfo?.cookies).toHaveLength(3);
+    expect(result.authInfo?.cookies.find(c => c.name === 'cookie1')?.value).toBe('new');
+  });
+
+});
+
+describe('WeChatService uploadImage', () => {
+  let mockSecretStorage: Partial<vscode.SecretStorage>;
+  let weChatService: WeChatService;
+
+  beforeEach(() => {
+    mockSecretStorage = {
+      get: jest.fn(),
+      store: jest.fn(),
+      delete: jest.fn(),
+    };
+    weChatService = new WeChatService(mockSecretStorage as vscode.SecretStorage);
+    jest.clearAllMocks();
+  });
+
+  it('should successfully upload image', async () => {
+    const mockAuth: WeChatAuthInfo = {
+      token: 'test-token',
+      ticket: 'test-ticket',
+      userName: 'test-user',
+      nickName: 'Test User',
+      svrTime: 123456,
+      avatar: 'avatar-url',
+      cookies: [],
+    };
+
+    await weChatService.saveAuthInfo(mockAuth);
+    mockFetch.mockResolvedValue({
+      status: 200,
+      json: jest.fn().mockResolvedValue({
+        base_resp: { err_msg: 'ok' },
+        cdn_url: 'https://cdn.example.com/image.jpg',
+      }),
+    });
+
+    const buffer = Buffer.from('fake image data');
+    const result = await weChatService.uploadImage(buffer, 'test.jpg');
+
+    expect(result.success).toBe(true);
+    expect(result.cdnUrl).toBe('https://cdn.example.com/image.jpg');
+  });
 });

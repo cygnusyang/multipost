@@ -12,12 +12,6 @@ const mockWeChatService: any = {
   createDraft: jest.fn(),
 };
 
-const mockPreviewService: any = {
-  openPreview: jest.fn(),
-  updateAuthStatus: jest.fn(),
-  setMessageHandler: jest.fn(),
-};
-
 const mockSettingsService: any = {
   getDefaultAuthor: jest.fn(() => 'Default Author'),
   shouldAutoOpenDraft: jest.fn(() => true),
@@ -32,10 +26,6 @@ const mockChromeCdpService: any = {
 
 jest.mock('src/services/WeChatService', () => ({
   WeChatService: jest.fn(() => mockWeChatService),
-}));
-
-jest.mock('src/services/PreviewService', () => ({
-  PreviewService: jest.fn(() => mockPreviewService),
 }));
 
 jest.mock('src/services/SettingsService', () => ({
@@ -129,45 +119,12 @@ describe('extension', () => {
 
   it('should activate without error', async () => {
     await expect(activate(mockContext)).resolves.not.toThrow();
-    expect(vscode.commands.registerCommand).toHaveBeenCalledTimes(3);
-    expect(mockContext.subscriptions).toHaveLength(4);
+    expect(vscode.commands.registerCommand).toHaveBeenCalledTimes(2);
+    expect(mockContext.subscriptions).toHaveLength(3);
   });
 
   it('should deactivate without error', () => {
     expect(() => deactivate()).not.toThrow();
-  });
-
-  it('should wire webview message handler for upload and copy', async () => {
-    await activate(mockContext);
-    const handler = mockPreviewService.setMessageHandler.mock.calls[0][0];
-
-    await handler({ type: 'uploadToWeChat' });
-    await handler({ type: 'copyHtml', html: '<p>x</p>' });
-
-    expect(vscode.commands.executeCommand).toHaveBeenCalledWith('multipost.uploadToWeChat');
-    expect(vscode.env.clipboard.writeText).toHaveBeenCalledWith('<p>x</p>');
-  });
-
-  it('should open preview for active editor', async () => {
-    await activate(mockContext);
-    (vscode.window as any).activeTextEditor = {
-      document: {
-        getText: () => '# Hello',
-      },
-    };
-
-    registeredCommands.get('multipost.preview')!();
-
-    expect(mockPreviewService.openPreview).toHaveBeenCalledWith('# Hello');
-    expect(mockPreviewService.updateAuthStatus).toHaveBeenCalledWith(false, undefined);
-  });
-
-  it('should show error when preview runs without active editor', async () => {
-    await activate(mockContext);
-
-    registeredCommands.get('multipost.preview')!();
-
-    expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('No active editor');
   });
 
   it('should show error when upload runs without active editor', async () => {
@@ -178,13 +135,12 @@ describe('extension', () => {
     expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('No active editor');
   });
 
-  it('should logout and update preview auth status', async () => {
+  it('should logout', async () => {
     await activate(mockContext);
 
     await registeredCommands.get('multipost.logoutWeChat')!();
 
     expect(mockWeChatService.clearAuth).toHaveBeenCalled();
-    expect(mockPreviewService.updateAuthStatus).toHaveBeenCalledWith(false, undefined);
     expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('Logged out from MultiPost');
   });
 
@@ -273,7 +229,7 @@ describe('extension', () => {
     await activate(mockContext);
     await Promise.resolve();
 
-    expect(mockPreviewService.updateAuthStatus).not.toHaveBeenCalledWith(true, expect.anything());
+    // 由于删除了 PreviewService，我们不再检查 updateAuthStatus
   });
 
   it('should start CDP login before upload when not authenticated', async () => {

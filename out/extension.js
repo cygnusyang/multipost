@@ -37,12 +37,10 @@ exports.activate = activate;
 exports.deactivate = deactivate;
 const vscode = __importStar(require("vscode"));
 const WeChatService_1 = require("./services/WeChatService");
-const PreviewService_1 = require("./services/PreviewService");
 const SettingsService_1 = require("./services/SettingsService");
 const ChromeCDPService_1 = require("./services/ChromeCDPService");
 const extractTitle_1 = require("./utils/extractTitle");
 let weChatService;
-let previewService;
 let settingsService;
 let chromeCdpService;
 let outputChannel;
@@ -73,46 +71,17 @@ async function activate(context) {
         log('Step 1: Initializing services...');
         // Initialize services
         weChatService = new WeChatService_1.WeChatService(context.secrets, outputChannel);
-        previewService = new PreviewService_1.PreviewService(context.extensionUri);
         settingsService = new SettingsService_1.SettingsService(context);
         const storagePath = context.globalStorageUri?.fsPath || context.extensionPath;
         chromeCdpService = new ChromeCDPService_1.ChromeCDPService(outputChannel, storagePath);
         log('Services initialized successfully');
-        previewService.setMessageHandler(async (message) => {
-            log(`Received message from preview webview: ${message.type}`);
-            if (message.type === 'uploadToWeChat') {
-                await vscode.commands.executeCommand('multipost.uploadToWeChat');
-            }
-            else if (message.type === 'copyHtml') {
-                await vscode.env.clipboard.writeText(message.html);
-                vscode.window.showInformationMessage('HTML copied to clipboard');
-                log('HTML copied to clipboard');
-            }
-        });
         log('Step 2: Registering commands...');
         log(`Available vscode.commands: ${typeof vscode.commands}`);
         // Register commands
-        let disposable = vscode.commands.registerCommand('multipost.preview', () => {
-            log('Command invoked: multipost.preview');
-            const editor = vscode.window.activeTextEditor;
-            if (!editor) {
-                vscode.window.showErrorMessage('No active editor');
-                log('Error: No active editor', 'error');
-                return;
-            }
-            const markdown = editor.document.getText();
-            log(`Got markdown from editor: ${markdown.length} characters`);
-            previewService.openPreview(markdown);
-            updatePreviewAuthStatus();
-            log('Preview opened successfully');
-        });
-        context.subscriptions.push(disposable);
-        log(`Command registered: multipost.preview, disposable: ${!!disposable}`);
-        disposable = vscode.commands.registerCommand('multipost.logoutWeChat', async () => {
+        let disposable = vscode.commands.registerCommand('multipost.logoutWeChat', async () => {
             log('Command invoked: multipost.logoutWeChat');
             weChatService.clearAuth();
             vscode.window.showInformationMessage('Logged out from MultiPost');
-            updatePreviewAuthStatus();
             log('User logged out successfully');
         });
         context.subscriptions.push(disposable);
@@ -143,7 +112,6 @@ async function activate(context) {
         log('Step 3: Loading saved authentication from storage in background...');
         void weChatService.loadAuthFromStorage().then(() => {
             log('Saved auth loaded');
-            updatePreviewAuthStatus();
         }).catch((error) => {
             log(`Background auth load failed: ${error.message}`, 'warn');
         });
@@ -160,10 +128,6 @@ async function activate(context) {
         outputChannel.show(true);
         throw error;
     }
-}
-function updatePreviewAuthStatus() {
-    const authInfo = weChatService.getAuthInfo();
-    previewService.updateAuthStatus(!!authInfo, authInfo?.nickName);
 }
 /**
  * Ensure we have an active authenticated CDP session
@@ -196,7 +160,6 @@ async function ensureCdpAuthenticatedSession(progress) {
                 return false;
             }
             log(`User authenticated: ${result.authInfo.nickName}`);
-            updatePreviewAuthStatus();
             return true;
         }
         // Already have an active CDP session - reuse it

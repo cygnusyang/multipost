@@ -67,8 +67,9 @@ export class ChromeCDPService {
 
       this.log('Login detected, extracting cookies');
 
-      // Get all cookies from page for current URL
-      const cookies = await page.cookies();
+      // Get all cookies from browser context
+      const context = page.browserContext();
+      const cookies = await context.cookies();
       this.log(`Extracted ${cookies.length} cookies from Chrome`);
 
       // Keep browser open for authenticated session
@@ -175,6 +176,11 @@ export class ChromeCDPService {
         throw new Error(`All ${failCount} cookies failed to set. Cannot proceed with authentication.`);
       }
 
+      // Reload page to apply cookies
+      this.log('Reloading page to apply cookies');
+      await page.reload({ waitUntil: 'networkidle2' });
+      this.log(`Page reloaded, new URL: ${page.url()}`);
+
       // Check if we're already logged in
       const isLoggedIn = await this.waitForLogin(page);
 
@@ -262,158 +268,62 @@ export class ChromeCDPService {
     this.log(`[DEBUG] Step 1: Starting draft creation`);
     this.log(`[DEBUG] Title: "${title}", Author: "${author}", Content length: ${content.length}`);
 
-    // 导航路径：首页 → 内容管理 → 草稿箱 → 新的创作
-    const homeUrl = 'https://mp.weixin.qq.com/cgi-bin/home?t=home/index&lang=zh_CN';
-    this.log(`[DEBUG] Step 2: Navigating to home page: ${homeUrl}`);
-    await page.goto(homeUrl, {
-      waitUntil: 'networkidle2',
-    });
-    const homeFinalUrl = page.url();
-    this.log(`[DEBUG] Step 2 complete: Navigated to home. Final URL: ${homeFinalUrl}`);
+    try {
+      await page.bringToFront();
+      await this.sleep(500);
 
-    // 点击内容管理
-    this.log('[DEBUG] Step 3: Clicking content management');
-    const contentManagementSelectors = [
-      'a[href*="content"]',
-      'a[href*="draft"]',
-      'a[title*="内容"]',
-      'a[title*="管理"]',
-      'a:has(span:contains("内容"))',
-      'a:has(span:contains("管理"))'
-    ];
-
-    let contentManagementClicked = false;
-    for (const selector of contentManagementSelectors) {
-      try {
-        this.log(`[DEBUG] Trying selector: ${selector}`);
-        await page.waitForSelector(selector, { timeout: 5000, visible: true });
-        this.log(`[DEBUG] Selector found: ${selector}, clicking...`);
-        await page.click(selector);
-        contentManagementClicked = true;
-        this.log('[DEBUG] Content management clicked');
-        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
-        this.log(`[DEBUG] Navigated to: ${page.url()}`);
-        break;
-      } catch (error) {
-        this.log(`[DEBUG] Selector ${selector} not found: ${error}`);
+      // Step 2: ensure current browser page is in authenticated state
+      const isLoggedIn = await this.waitForLogin(page);
+      if (!isLoggedIn) {
+        await this.capturePageSnapshot(page, 'login-not-detected-before-create');
+        throw new Error('Current browser session is not logged in. Please complete QR login first.');
       }
-    }
 
-    if (!contentManagementClicked) {
-      this.log('[DEBUG] Content management not found, trying direct navigation');
-      await page.goto('https://mp.weixin.qq.com/cgi-bin/appmsg?action=list&type=10&count=20&day=7', {
-        waitUntil: 'networkidle2',
+      // Step 3: get token from URL/window context and go to appmsg list page (draft entry page)
+      const token = await this.extractTokenFromPage(page);
+      const listUrl = `https://mp.weixin.qq.com/cgi-bin/appmsg?action=list&type=10&begin=0&count=10&lang=zh_CN&token=${encodeURIComponent(token)}`;
+      this.log(`[DEBUG] Step 3: Navigating to appmsg list: ${listUrl}`);
+      await page.goto(listUrl, { waitUntil: 'networkidle2' });
+      this.log(`[DEBUG] Step 3 complete: ${page.url()}`);
+
+      // Step 4: click create/new entry from real page structure (no unsupported pseudo selectors)
+      this.log('[DEBUG] Step 4: Trying to click create/new article entry');
+      const clickedCreate = await this.clickByHeuristic(page, {
+        stepLabel: 'new-creation-entry',
+        selectors: ['a[href*="appmsg_edit"]', 'a[href*="operate_appmsg"]', '[class*="create"]', '[class*="new"]'],
+        textIncludes: ['新建', '创作', '写新文章', '图文消息'],
+        hrefIncludes: ['appmsg_edit', 'operate_appmsg'],
       });
-    }
 
-    // 点击草稿箱
-    this.log('[DEBUG] Step 4: Clicking draft box');
-    const draftBoxSelectors = [
-      'a[href*="draft"]',
-      'a[title*="草稿"]',
-      'a:has(span:contains("草稿"))',
-      'a[href*="appmsg?action=draft"]'
-    ];
-
-    let draftBoxClicked = false;
-    for (const selector of draftBoxSelectors) {
-      try {
-        this.log(`[DEBUG] Trying selector: ${selector}`);
-        await page.waitForSelector(selector, { timeout: 5000, visible: true });
-        this.log(`[DEBUG] Selector found: ${selector}, clicking...`);
-        await page.click(selector);
-        draftBoxClicked = true;
-        this.log('[DEBUG] Draft box clicked');
-        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
-        this.log(`[DEBUG] Navigated to: ${page.url()}`);
-        break;
-      } catch (error) {
-        this.log(`[DEBUG] Selector ${selector} not found: ${error}`);
+      if (clickedCreate) {
+        await this.waitForPotentialNavigation(page);
+      } else {
+        this.log('[DEBUG] Create entry not found from list, falling back to direct editor URL (without appmsgid)');
+        const editorUrl = `https://mp.weixin.qq.com/cgi-bin/operate_appmsg?t=media/appmsg_edit&action=edit&type=77&lang=zh_CN&token=${encodeURIComponent(token)}`;
+        await page.goto(editorUrl, { waitUntil: 'networkidle2' });
       }
-    }
 
-    if (!draftBoxClicked) {
-      this.log('[DEBUG] Draft box not found, trying direct navigation');
-      await page.goto('https://mp.weixin.qq.com/cgi-bin/appmsg?action=draft', {
-        waitUntil: 'networkidle2',
+      // Step 5: if there is a second-level "write new article" entrance, click it
+      this.log('[DEBUG] Step 5: Trying to click optional "write new article" button');
+      const clickedWrite = await this.clickByHeuristic(page, {
+        stepLabel: 'write-new-article',
+        selectors: ['a[href*="appmsg_edit"]', 'button', '[role="button"]', '[class*="write"]'],
+        textIncludes: ['写新文章', '新建文章'],
+        hrefIncludes: ['appmsg_edit', 'operate_appmsg'],
       });
-    }
-
-    // 点击新的创作
-    this.log('[DEBUG] Step 5: Clicking new creation');
-    const newCreationSelectors = [
-      'a[href*="appmsg_edit"]',
-      'a[href*="operate_appmsg"]',
-      'a[title*="新建"]',
-      'a[title*="创作"]',
-      'a:has(span:contains("新建"))',
-      'a:has(span:contains("创作"))',
-      'button:contains("新建")',
-      'button:contains("创作")',
-      '[class*="new"]',
-      '.weui-btn-new'
-    ];
-
-    let newCreationClicked = false;
-    for (const selector of newCreationSelectors) {
-      try {
-        this.log(`[DEBUG] Trying selector: ${selector}`);
-        await page.waitForSelector(selector, { timeout: 5000, visible: true });
-        this.log(`[DEBUG] Selector found: ${selector}, clicking...`);
-        await page.click(selector);
-        newCreationClicked = true;
-        this.log('[DEBUG] New creation clicked');
-        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
-        this.log(`[DEBUG] Navigated to: ${page.url()}`);
-        break;
-      } catch (error) {
-        this.log(`[DEBUG] Selector ${selector} not found: ${error}`);
+      if (clickedWrite) {
+        await this.waitForPotentialNavigation(page);
       }
-    }
-
-    if (!newCreationClicked) {
-      this.log('[DEBUG] New creation button not found, trying direct navigation');
-      await page.goto('https://mp.weixin.qq.com/cgi-bin/operate_appmsg?t=media/appmsg_edit&action=edit&type=77&appmsgid=100000000', {
-        waitUntil: 'networkidle2',
-      });
-    }
-
-    // 点击"写新文章"按钮（如果存在）
-    this.log('[DEBUG] Step 6: Checking and clicking "Write New Article" button');
-    const writeNewArticleSelectors = [
-      'a[href*="appmsg_edit"]',
-      'a[title*="写新文章"]',
-      'a:has(span:contains("写新文章"))',
-      'button:contains("写新文章")',
-      '[class*="write"]'
-    ];
-
-    let writeNewArticleClicked = false;
-    for (const selector of writeNewArticleSelectors) {
-      try {
-        this.log(`[DEBUG] Trying selector: ${selector}`);
-        await page.waitForSelector(selector, { timeout: 3000, visible: true });
-        this.log(`[DEBUG] Selector found: ${selector}, clicking...`);
-        await page.click(selector);
-        writeNewArticleClicked = true;
-        this.log('[DEBUG] Write New Article button clicked');
-        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
-        this.log(`[DEBUG] Navigated to: ${page.url()}`);
-        break;
-      } catch (error) {
-        this.log(`[DEBUG] Selector ${selector} not found or failed to click: ${error}`);
-      }
-    }
-
-    if (!writeNewArticleClicked) {
-      this.log('[DEBUG] Write New Article button not found or not needed');
+    } catch (error) {
+      await this.capturePageSnapshot(page, 'draft-create-navigation-failed');
+      throw error;
     }
 
     // Wait for editor to load
     this.log('[DEBUG] Step 6: Waiting for editor to load');
 
     // Wait for editor to load - try multiple selectors
-    const editorSelectors = ['#js_media_edit', '#editorContainer', '.editor-container', '.ueditor-wrapper'];
+    const editorSelectors = ['#js_media_edit', '#editorContainer', '.editor-container', '.ueditor-wrapper', '#title'];
     let editorElement = null;
     for (const selector of editorSelectors) {
       try {
@@ -481,9 +391,9 @@ export class ChromeCDPService {
 
     // Fill author
     this.log('[DEBUG] Step 7: Filling author field');
-    await page.waitForSelector('#author', { timeout: 10000 });
+    await page.waitForSelector('#author, input[name="author"]', { timeout: 10000 });
     await page.evaluate((authorText: string) => {
-      const authorInput = document.getElementById('author') as HTMLInputElement;
+      const authorInput = (document.getElementById('author') || document.querySelector('input[name="author"]')) as HTMLInputElement;
       if (authorInput) {
         authorInput.value = authorText;
         authorInput.dispatchEvent(new Event('input', { bubbles: true }));
@@ -493,11 +403,12 @@ export class ChromeCDPService {
 
     // Wait for rich text editor iframe to load
     this.log('[DEBUG] Step 8: Waiting for editor iframe (#ueditor_iframe)');
-    await page.waitForSelector('#ueditor_iframe', { timeout: 10000 });
+    await page.waitForSelector('#ueditor_iframe, iframe[id*="ueditor"], iframe[src*="ueditor"]', { timeout: 10000 });
     this.log('[DEBUG] Editor iframe found, looking for ueditor frame');
-    const frame = page.frames().find(f => f.url().includes('ueditor'));
+    const frame = page.frames().find(f => f.url().includes('ueditor') || f.name().includes('ueditor'));
 
     if (!frame) {
+      await this.capturePageSnapshot(page, 'ueditor-frame-not-found');
       throw new Error('Could not find editor iframe');
     }
     this.log(`[DEBUG] Found editor frame, URL: ${frame.url()}`);
@@ -523,9 +434,9 @@ export class ChromeCDPService {
     if (digest) {
       this.log('[DEBUG] Step 11: Filling digest if available');
       try {
-        await page.waitForSelector('#digest', { timeout: 5000 });
+        await page.waitForSelector('#digest, textarea[name="digest"]', { timeout: 5000 });
         await page.evaluate((digestText: string) => {
-          const digestInput = document.getElementById('digest') as HTMLTextAreaElement;
+          const digestInput = (document.getElementById('digest') || document.querySelector('textarea[name="digest"]')) as HTMLTextAreaElement;
           if (digestInput) {
             digestInput.value = digestText;
             digestInput.dispatchEvent(new Event('input', { bubbles: true }));
@@ -539,15 +450,22 @@ export class ChromeCDPService {
 
     // Find save draft button and click it
     this.log('[DEBUG] Step 12: Finding and clicking Save Draft button (#js_submit)');
-    await page.waitForSelector('#js_submit', { timeout: 10000 });
-    this.log('[DEBUG] Save Draft button found, clicking...');
-    await page.click('#js_submit');
+    const saveClicked = await this.clickByHeuristic(page, {
+      stepLabel: 'save-draft',
+      selectors: ['#js_submit', 'button', 'a[role="button"]', '[class*="submit"]'],
+      textIncludes: ['保存为草稿', '保存草稿', '保存'],
+      hrefIncludes: [],
+    });
+    if (!saveClicked) {
+      await this.capturePageSnapshot(page, 'save-draft-button-not-found');
+      throw new Error('Could not find save draft button');
+    }
     this.log('[DEBUG] Save Draft button clicked');
 
     // Wait for save to complete and get to draft URL
     this.log('[DEBUG] Step 13: Waiting for navigation after save (60s timeout)');
-    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 60000 });
-    this.log('[DEBUG] Navigation complete');
+    await this.waitForPotentialNavigation(page, 60000);
+    this.log('[DEBUG] Save phase complete');
 
     // Get current URL which is the edit URL for created draft
     const draftUrl = page.url();
@@ -555,6 +473,151 @@ export class ChromeCDPService {
     vscode.window.showInformationMessage('Draft created successfully in Chrome');
 
     return draftUrl;
+  }
+
+  private async waitForPotentialNavigation(page: Page, timeout = 30000): Promise<void> {
+    try {
+      await page.waitForNavigation({ waitUntil: 'networkidle2', timeout });
+      return;
+    } catch {
+      // Some WeChat operations are ajax-only and do not navigate.
+      await this.sleep(1500);
+    }
+  }
+
+  private async sleep(ms: number): Promise<void> {
+    await new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  private async clickByHeuristic(
+    page: Page,
+    options: {
+      stepLabel: string;
+      selectors: string[];
+      textIncludes: string[];
+      hrefIncludes: string[];
+    }
+  ): Promise<boolean> {
+    const { stepLabel, selectors, textIncludes, hrefIncludes } = options;
+
+    // First pass: plain selectors (fast path)
+    for (const selector of selectors) {
+      try {
+        await page.waitForSelector(selector, { timeout: 2000, visible: true });
+        await page.click(selector);
+        this.log(`[DEBUG] ${stepLabel}: clicked by selector ${selector}`);
+        return true;
+      } catch {
+        // continue
+      }
+    }
+
+    // Second pass: text/href heuristic in browser context
+    const result = await page.evaluate(
+      ({ textIncludes, hrefIncludes }) => {
+        const candidates = Array.from(document.querySelectorAll('a,button,[role="button"]'));
+        const norm = (value: string | null | undefined): string => (value || '').trim().replace(/\s+/g, '');
+
+        const matches = candidates.filter((el) => {
+          const text = norm((el as HTMLElement).innerText || el.textContent);
+          const href = norm((el as HTMLAnchorElement).getAttribute?.('href'));
+          const title = norm((el as HTMLElement).getAttribute?.('title'));
+          const haystack = `${text}|${title}`;
+          const textMatched = textIncludes.some((keyword) => haystack.includes(keyword));
+          const hrefMatched = hrefIncludes.some((keyword) => href.includes(keyword));
+          return textMatched || hrefMatched;
+        });
+
+        if (matches.length === 0) {
+          return { clicked: false, reason: 'no-match' };
+        }
+
+        const target = matches[0] as HTMLElement;
+        target.click();
+        return {
+          clicked: true,
+          text: norm(target.innerText || target.textContent),
+          href: norm((target as HTMLAnchorElement).getAttribute?.('href')),
+          title: norm(target.getAttribute?.('title')),
+        };
+      },
+      { textIncludes, hrefIncludes }
+    );
+
+    if (result.clicked) {
+      this.log(
+        `[DEBUG] ${stepLabel}: clicked by heuristic (text="${result.text || ''}", title="${result.title || ''}", href="${result.href || ''}")`
+      );
+      return true;
+    }
+
+    this.log(`[DEBUG] ${stepLabel}: click failed (${result.reason})`, 'warn');
+    return false;
+  }
+
+  private async extractTokenFromPage(page: Page): Promise<string> {
+    const tokenFromUrl = new URL(page.url()).searchParams.get('token');
+    if (tokenFromUrl) {
+      this.log(`[DEBUG] Token extracted from URL: ${tokenFromUrl}`);
+      return tokenFromUrl;
+    }
+
+    const tokenFromWindow = await page.evaluate(() => {
+      const maybeGlobal = (window as any).global;
+      if (maybeGlobal && maybeGlobal.token) {
+        return String(maybeGlobal.token);
+      }
+      return '';
+    });
+    if (tokenFromWindow) {
+      this.log(`[DEBUG] Token extracted from window.global: ${tokenFromWindow}`);
+      return tokenFromWindow;
+    }
+
+    await this.capturePageSnapshot(page, 'token-not-found');
+    throw new Error('Could not extract token from current page. Please relogin and retry.');
+  }
+
+  private async capturePageSnapshot(page: Page, label: string): Promise<void> {
+    try {
+      const debugDir = path.join(this.userDataDir, 'debug');
+      fs.mkdirSync(debugDir, { recursive: true });
+      const ts = Date.now();
+      const safeLabel = label.replace(/[^a-zA-Z0-9-_]/g, '_');
+      const screenshotPath = path.join(debugDir, `${ts}-${safeLabel}.png`);
+      const jsonPath = path.join(debugDir, `${ts}-${safeLabel}.json`);
+
+      const structure = await page.evaluate(() => {
+        const nodes = Array.from(document.querySelectorAll('a,button,input,textarea,iframe,[role="button"]')).slice(0, 300);
+        const simplifiedNodes = nodes.map((el) => {
+          const htmlEl = el as HTMLElement;
+          return {
+            tag: el.tagName.toLowerCase(),
+            id: htmlEl.id || '',
+            className: htmlEl.className || '',
+            text: (htmlEl.innerText || htmlEl.textContent || '').trim().slice(0, 120),
+            href: (el as HTMLAnchorElement).getAttribute?.('href') || '',
+            title: htmlEl.getAttribute?.('title') || '',
+            name: (el as HTMLInputElement).name || '',
+          };
+        });
+
+        return {
+          url: window.location.href,
+          title: document.title,
+          bodyTextHead: (document.body?.innerText || '').slice(0, 2000),
+          nodeCount: nodes.length,
+          nodes: simplifiedNodes,
+        };
+      });
+
+      fs.writeFileSync(jsonPath, JSON.stringify(structure, null, 2), 'utf-8');
+      await page.screenshot({ path: screenshotPath, fullPage: true });
+      this.log(`[DEBUG] Snapshot captured: ${jsonPath}`);
+      this.log(`[DEBUG] Snapshot captured: ${screenshotPath}`);
+    } catch (snapshotError) {
+      this.log(`[DEBUG] Failed to capture snapshot: ${snapshotError}`, 'warn');
+    }
   }
 
   /**
@@ -618,7 +681,33 @@ export class ChromeCDPService {
           return true;
         }
 
-        // Debug: periodically log window.global content
+        // Check if page contains user info elements (avatar, nickname, etc.)
+        const hasUserElements = await page.evaluate(() => {
+          return document.querySelector('.user-avatar') ||
+                 document.querySelector('.nickname') ||
+                 document.querySelector('.user-info');
+        });
+
+        if (hasUserElements) {
+          this.log('Login detected: user info elements found');
+          return true;
+        }
+
+        // Check if page contains logout button
+        const hasLogoutButton = await page.evaluate(() => {
+          return Array.from(document.querySelectorAll('a')).some(link => {
+            const text = link.innerText || '';
+            return text.includes('退出');
+          });
+        });
+
+        if (hasLogoutButton) {
+          this.log('Login detected: logout button found');
+          return true;
+        }
+
+
+        // Debug: periodically log page structure and window.global content
         checksPassed++;
         if (checksPassed % 5 === 0) {
           const globalContent = await page.evaluate(() => {
@@ -627,6 +716,17 @@ export class ChromeCDPService {
           });
           this.log(`Login check # ${checksPassed}: page URL = ${url}`);
           this.log(`window.global content: ${globalContent.substring(0, 500)}`, 'info');
+
+          // Log page structure for debugging
+          const pageStructure = await page.evaluate(() => {
+            return {
+              bodyText: document.body.innerText.substring(0, 500),
+              linksCount: document.querySelectorAll('a').length,
+              imageCount: document.querySelectorAll('img').length,
+              divCount: document.querySelectorAll('div').length
+            };
+          });
+          this.log(`Page structure: ${JSON.stringify(pageStructure)}`, 'info');
         }
       } catch (evalError) {
         // Ignore evaluation errors, continue polling
@@ -647,6 +747,22 @@ export class ChromeCDPService {
         return typeof window.global !== 'undefined' ? JSON.stringify(window.global, null, 2) : 'window.global undefined';
       });
       this.log(`Final window.global: ${globalContent}`, 'warn');
+
+      // Log final page structure for debugging
+      const finalPageStructure = await page.evaluate(() => {
+        return {
+          bodyText: document.body.innerText.substring(0, 500),
+          linksCount: document.querySelectorAll('a').length,
+          imageCount: document.querySelectorAll('img').length,
+          divCount: document.querySelectorAll('div').length,
+          allLinks: Array.from(document.querySelectorAll('a')).map(link => ({
+            href: link.getAttribute('href'),
+            text: link.innerText,
+            title: link.getAttribute('title')
+          }))
+        };
+      });
+      this.log(`Final page structure: ${JSON.stringify(finalPageStructure)}`, 'warn');
     } catch (e) {
       this.log(`Could not capture final page state: ${e}`, 'error');
     }

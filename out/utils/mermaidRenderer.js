@@ -50,6 +50,97 @@ function log(message, level = 'info') {
         console.log(logMessage);
     }
 }
+// Polyfill for text.getBBox() method which is not implemented in JSDOM
+function addGetBBoxPolyfill() {
+    const originalSVGTextElement = global.window.SVGTextElement;
+    if (originalSVGTextElement && !originalSVGTextElement.prototype.getBBox) {
+        originalSVGTextElement.prototype.getBBox = function () {
+            return {
+                x: 0,
+                y: 0,
+                width: 0,
+                height: 0,
+                left: 0,
+                right: 0,
+                top: 0,
+                bottom: 0,
+                toJSON: () => ({
+                    x: 0,
+                    y: 0,
+                    width: 0,
+                    height: 0,
+                    left: 0,
+                    right: 0,
+                    top: 0,
+                    bottom: 0,
+                }),
+            };
+        };
+    }
+    const originalSVGTSpanElement = global.window.SVGTSpanElement;
+    if (originalSVGTSpanElement && !originalSVGTSpanElement.prototype.getBBox) {
+        originalSVGTSpanElement.prototype.getBBox = function () {
+            return {
+                x: 0,
+                y: 0,
+                width: 0,
+                height: 0,
+                left: 0,
+                right: 0,
+                top: 0,
+                bottom: 0,
+                toJSON: () => ({
+                    x: 0,
+                    y: 0,
+                    width: 0,
+                    height: 0,
+                    left: 0,
+                    right: 0,
+                    top: 0,
+                    bottom: 0,
+                }),
+            };
+        };
+    }
+    // Add polyfill for other SVG elements if needed
+    const svgElementTypes = [
+        'SVGCircleElement',
+        'SVGEllipseElement',
+        'SVGLineElement',
+        'SVGPathElement',
+        'SVGPolygonElement',
+        'SVGPolylineElement',
+        'SVGRectElement',
+        'SVGSVGElement',
+    ];
+    svgElementTypes.forEach(type => {
+        const elementConstructor = global.window[type];
+        if (elementConstructor && !elementConstructor.prototype.getBBox) {
+            elementConstructor.prototype.getBBox = function () {
+                return {
+                    x: 0,
+                    y: 0,
+                    width: 0,
+                    height: 0,
+                    left: 0,
+                    right: 0,
+                    top: 0,
+                    bottom: 0,
+                    toJSON: () => ({
+                        x: 0,
+                        y: 0,
+                        width: 0,
+                        height: 0,
+                        left: 0,
+                        right: 0,
+                        top: 0,
+                        bottom: 0,
+                    }),
+                };
+            };
+        }
+    });
+}
 async function initMermaid() {
     if (mermaidInitialized) {
         log('Mermaid already initialized');
@@ -69,6 +160,9 @@ async function initMermaid() {
             writable: true
         });
         log('JSDOM global objects set up');
+        // Add polyfill for getBBox() method which is not implemented in JSDOM
+        addGetBBoxPolyfill();
+        log('getBBox() polyfill added');
         // Dynamic import after DOM is ready
         log('Dynamically importing mermaid module...');
         const mermaidModule = await Promise.resolve().then(() => __importStar(require('mermaid')));

@@ -1,12 +1,10 @@
 import * as vscode from 'vscode';
 import { WeChatService } from './services/WeChatService';
-import { PreviewService } from './services/PreviewService';
 import { SettingsService } from './services/SettingsService';
 import { ChromeCDPService } from './services/ChromeCDPService';
 import { extractTitle } from './utils/extractTitle';
 
 let weChatService: WeChatService;
-let previewService: PreviewService;
 let settingsService: SettingsService;
 let chromeCdpService: ChromeCDPService;
 let outputChannel: vscode.OutputChannel;
@@ -42,54 +40,21 @@ export async function activate(context: vscode.ExtensionContext) {
     log('Step 1: Initializing services...');
     // Initialize services
     weChatService = new WeChatService(context.secrets, outputChannel);
-    previewService = new PreviewService(context.extensionUri);
     settingsService = new SettingsService(context);
     const storagePath = context.globalStorageUri?.fsPath || context.extensionPath;
     chromeCdpService = new ChromeCDPService(outputChannel, storagePath);
     log('Services initialized successfully');
-
-    previewService.setMessageHandler(async (message) => {
-      log(`Received message from preview webview: ${message.type}`);
-      if (message.type === 'uploadToWeChat') {
-        await vscode.commands.executeCommand('multipost.uploadToWeChat');
-      } else if (message.type === 'copyHtml') {
-        await vscode.env.clipboard.writeText(message.html);
-        vscode.window.showInformationMessage('HTML copied to clipboard');
-        log('HTML copied to clipboard');
-      }
-    });
 
     log('Step 2: Registering commands...');
     log(`Available vscode.commands: ${typeof vscode.commands}`);
     
     // Register commands
     let disposable = vscode.commands.registerCommand(
-      'multipost.preview',
-      () => {
-        log('Command invoked: multipost.preview');
-        const editor = vscode.window.activeTextEditor;
-        if (!editor) {
-          vscode.window.showErrorMessage('No active editor');
-          log('Error: No active editor', 'error');
-          return;
-        }
-        const markdown = editor.document.getText();
-        log(`Got markdown from editor: ${markdown.length} characters`);
-        previewService.openPreview(markdown);
-        updatePreviewAuthStatus();
-        log('Preview opened successfully');
-      }
-    );
-    context.subscriptions.push(disposable);
-    log(`Command registered: multipost.preview, disposable: ${!!disposable}`);
-
-    disposable = vscode.commands.registerCommand(
       'multipost.logoutWeChat',
       async () => {
         log('Command invoked: multipost.logoutWeChat');
         weChatService.clearAuth();
         vscode.window.showInformationMessage('Logged out from MultiPost');
-        updatePreviewAuthStatus();
         log('User logged out successfully');
       }
     );
@@ -132,7 +97,6 @@ export async function activate(context: vscode.ExtensionContext) {
     log('Step 3: Loading saved authentication from storage in background...');
     void weChatService.loadAuthFromStorage().then(() => {
       log('Saved auth loaded');
-      updatePreviewAuthStatus();
     }).catch((error) => {
       log(`Background auth load failed: ${(error as Error).message}`, 'warn');
     });
@@ -151,11 +115,6 @@ export async function activate(context: vscode.ExtensionContext) {
     outputChannel.show(true);
     throw error;
   }
-}
-
-function updatePreviewAuthStatus(): void {
-  const authInfo = weChatService.getAuthInfo();
-  previewService.updateAuthStatus(!!authInfo, authInfo?.nickName);
 }
 
 /**
@@ -195,7 +154,6 @@ async function ensureCdpAuthenticatedSession(
       }
 
       log(`User authenticated: ${result.authInfo.nickName}`);
-      updatePreviewAuthStatus();
       return true;
     }
 
