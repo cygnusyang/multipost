@@ -180,61 +180,81 @@ export class PlaywrightService {
         throw new Error('Current browser session is not logged in. Please complete QR login first.');
       }
 
-      // Step 3: Navigate through the new interface
+      // Step 3: Navigate through the new interface (using the same steps as the Python script)
       // 内容管理 → 草稿箱 → 新的创作 → 写新文章
       this.log('[DEBUG] Step 3: Navigating to content management');
       await page.getByTitle('内容管理').click();
-      await page.waitForNavigation({ waitUntil: 'networkidle' });
+      await page.waitForLoadState('networkidle', { timeout: 60000 });
 
       this.log('[DEBUG] Step 4: Navigating to draft box');
       await page.getByRole('link', { name: '草稿箱' }).click();
-      await page.waitForNavigation({ waitUntil: 'networkidle' });
+      await page.waitForLoadState('networkidle', { timeout: 60000 });
 
       this.log('[DEBUG] Step 5: Clicking "New Creation"');
       await page.getByText('新的创作').click();
 
       this.log('[DEBUG] Step 6: Clicking "Write New Article"');
-      const [newPage] = await Promise.all([
-        page.waitForEvent('popup'),
-        page.getByRole('link', { name: '写新文章' }).click()
-      ]);
+      let page1: Page;
+      const popupPromise = page.waitForEvent('popup', { timeout: 60000 });
+      await page.getByRole('link', { name: '写新文章' }).click();
+      try {
+        page1 = await popupPromise;
+      } catch (error) {
+        // 如果没有弹出新窗口，可能是在当前窗口跳转
+        this.log('[DEBUG] No popup detected, checking current page');
+        page1 = page;
+      }
 
-      if (newPage) {
+      if (page1 && page1 !== page) {
         this.log('[DEBUG] Step 6: New page opened for article editing');
-        await newPage.waitForLoadState('networkidle');
-        this.authenticatedPage = newPage; // 更新为新页面
+        await page1.waitForLoadState('networkidle', { timeout: 60000 });
+        this.authenticatedPage = page1; // 更新为新页面
       }
 
       // Step 7: Fill in the form
       this.log('[DEBUG] Step 7: Filling in article details');
 
       // Fill title
-      await this.authenticatedPage.getByRole('textbox', { name: '请在这里输入标题' }).click();
-      await this.authenticatedPage.getByRole('textbox', { name: '请在这里输入标题' }).fill(title);
+      const titleSelector = this.authenticatedPage.getByRole('textbox', { name: '请在这里输入标题' });
+      await titleSelector.waitFor({ timeout: 60000 });
+      await titleSelector.click();
+      await titleSelector.fill(title);
 
       // Fill author
-      await this.authenticatedPage.getByRole('textbox', { name: '请输入作者' }).click();
-      await this.authenticatedPage.getByRole('textbox', { name: '请输入作者' }).fill(author);
+      const authorSelector = this.authenticatedPage.getByRole('textbox', { name: '请输入作者' });
+      await authorSelector.waitFor({ timeout: 60000 });
+      await authorSelector.click();
+      await authorSelector.fill(author);
 
       // Fill content
+      this.log('[DEBUG] Step 8: Filling content');
       await this.authenticatedPage.locator('section').click();
-      await this.authenticatedPage.locator('div').filter({ hasText: /^从这里开始写正文$/ }).nth(5).fill(content);
+      const contentSelector = this.authenticatedPage.locator('div').filter({ hasText: /^从这里开始写正文$/ });
+      await contentSelector.waitFor({ timeout: 60000 });
+      await contentSelector.fill(content);
 
       // Fill digest if provided
       if (digest) {
-        this.log('[DEBUG] Step 8: Filling digest');
+        this.log('[DEBUG] Step 9: Filling digest');
         try {
-          await this.authenticatedPage.getByRole('textbox', { name: '请输入摘要' }).click();
-          await this.authenticatedPage.getByRole('textbox', { name: '请输入摘要' }).fill(digest);
+          const digestSelector = this.authenticatedPage.getByRole('textbox', { name: '请输入摘要' });
+          await digestSelector.waitFor({ timeout: 30000 });
+          await digestSelector.click();
+          await digestSelector.fill(digest);
         } catch (error) {
           this.log(`[DEBUG] Digest field not found: ${error}`, 'warn');
         }
       }
 
       // Save as draft
-      this.log('[DEBUG] Step 9: Saving as draft');
-      await this.authenticatedPage.getByRole('button', { name: '保存为草稿' }).click();
-      await this.authenticatedPage.waitForNavigation({ waitUntil: 'networkidle' });
+      this.log('[DEBUG] Step 10: Saving as draft');
+      const saveButton = this.authenticatedPage.getByRole('button', { name: '保存为草稿' });
+      await saveButton.waitFor({ timeout: 60000 });
+
+      // 点击保存按钮并等待导航完成
+      const navigationPromise = this.authenticatedPage.waitForLoadState('networkidle', { timeout: 60000 });
+      await saveButton.click();
+      await navigationPromise;
 
       const draftUrl = this.authenticatedPage.url();
       this.log(`[DEBUG] Draft created successfully: ${draftUrl}`);

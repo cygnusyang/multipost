@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import { CookieParam } from 'puppeteer';
 import { activate, deactivate } from 'src/extension';
 import { processMarkdownForUpload } from 'src/utils/processMarkdown';
 
@@ -17,9 +16,8 @@ const mockSettingsService: any = {
   shouldAutoOpenDraft: jest.fn(() => true),
 };
 
-const mockChromeCdpService: any = {
+const mockPlaywrightService: any = {
   startFirstTimeLogin: jest.fn(),
-  startAuthenticatedSession: jest.fn(),
   createDraftInBrowser: jest.fn(),
   isSessionActive: jest.fn(() => false),
 };
@@ -32,8 +30,8 @@ jest.mock('src/services/SettingsService', () => ({
   SettingsService: jest.fn(() => mockSettingsService),
 }));
 
-jest.mock('src/services/ChromeCDPService', () => ({
-  ChromeCDPService: jest.fn(() => mockChromeCdpService),
+jest.mock('src/services/PlaywrightService', () => ({
+  PlaywrightService: jest.fn(() => mockPlaywrightService),
 }));
 
 jest.mock('src/utils/extractTitle', () => ({
@@ -100,14 +98,12 @@ describe('extension', () => {
     (vscode.window.withProgress as jest.Mock).mockImplementation((_, task) => task({ report: jest.fn() }));
     (vscode.Uri.parse as jest.Mock).mockImplementation((value: string) => value);
     mockWeChatService.getAuthInfo.mockReturnValue(null);
-    mockChromeCdpService.isSessionActive.mockReturnValue(false);
+    mockPlaywrightService.isSessionActive.mockReturnValue(false);
     mockWeChatService.loadAuthFromStorage.mockResolvedValue(undefined);
     mockWeChatService.checkAuth.mockResolvedValue({ isAuthenticated: true });
     mockWeChatService.checkAuthWithCookies.mockResolvedValue({ isAuthenticated: true, authInfo: { nickName: 'Tester' } });
     mockWeChatService.createDraft.mockResolvedValue({ success: true, draftUrl: 'https://example.com/draft' });
-    mockChromeCdpService.startFirstTimeLogin.mockResolvedValue([{ name: 'token', value: 'x', domain: '.mp.weixin.qq.com', path: '/' }]);
-    mockChromeCdpService.startAuthenticatedSession.mockResolvedValue(undefined);
-    mockChromeCdpService.createDraftInBrowser.mockResolvedValue('https://example.com/browser-draft');
+    mockPlaywrightService.createDraftInBrowser.mockResolvedValue('https://example.com/browser-draft');
     (processMarkdownForUpload as jest.Mock).mockResolvedValue({ html: '<p>rendered</p>', errors: [] });
     jest.spyOn(console, 'log').mockImplementation(() => {});
     jest.spyOn(console, 'error').mockImplementation(() => {});
@@ -119,8 +115,8 @@ describe('extension', () => {
 
   it('should activate without error', async () => {
     await expect(activate(mockContext)).resolves.not.toThrow();
-    expect(vscode.commands.registerCommand).toHaveBeenCalledTimes(3);
-    expect(mockContext.subscriptions).toHaveLength(4);
+    expect(vscode.commands.registerCommand).toHaveBeenCalledTimes(2);
+    expect(mockContext.subscriptions).toHaveLength(3);
   });
 
   it('should deactivate without error', () => {
@@ -144,23 +140,6 @@ describe('extension', () => {
     expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('Logged out from MultiPost');
   });
 
-  it('should show login failure during upload after cdp login', async () => {
-    await activate(mockContext);
-    const cookies = [{ name: 'token', value: 'x', domain: '.mp.weixin.qq.com', path: '/' }] as CookieParam[];
-    (vscode.window as any).activeTextEditor = {
-      document: {
-        getText: () => '# Title',
-        fileName: '/tmp/demo.md',
-      },
-    };
-    mockWeChatService.getAuthInfo.mockReturnValue(null);
-    mockChromeCdpService.startFirstTimeLogin.mockResolvedValue(cookies);
-    mockWeChatService.checkAuthWithCookies.mockResolvedValue({ isAuthenticated: false });
-
-    await registeredCommands.get('multipost.uploadToWeChat')!();
-
-    expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('Login failed. Please try again.');
-  });
 
   it('should show warning when markdown processing returns errors', async () => {
     await activate(mockContext);
@@ -200,28 +179,9 @@ describe('extension', () => {
 
     await registeredCommands.get('multipost.uploadToWeChat')!();
 
-    expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('CDP upload failed: processor failed');
+    expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('Playwright upload failed: processor failed');
   });
 
-  it('should keep cdp session when already active during automated upload', async () => {
-    await activate(mockContext);
-    const report = jest.fn();
-    (vscode.window.withProgress as jest.Mock).mockImplementation((_, task) => task({ report }));
-    (vscode.window as any).activeTextEditor = {
-      document: {
-        getText: () => '# Title',
-        fileName: '/tmp/demo.md',
-      },
-    };
-    mockWeChatService.getAuthInfo.mockReturnValue(null);
-    mockChromeCdpService.isSessionActive.mockReturnValue(true);
-    mockChromeCdpService.createDraftInBrowser.mockResolvedValue('https://example.com/browser-draft');
-
-    await registeredCommands.get('multipost.uploadToWeChat')!();
-
-    expect(mockChromeCdpService.startFirstTimeLogin).not.toHaveBeenCalled();
-    expect(mockChromeCdpService.createDraftInBrowser).toHaveBeenCalled();
-  });
 
   it('should surface background auth load failure as warning log path', async () => {
     mockWeChatService.loadAuthFromStorage.mockRejectedValueOnce(new Error('load failed'));
@@ -232,52 +192,4 @@ describe('extension', () => {
     // 由于删除了 PreviewService，我们不再检查 updateAuthStatus
   });
 
-  it('should start CDP login before upload when not authenticated', async () => {
-    await activate(mockContext);
-    const cookies = [{ name: 'token', value: 'x', domain: '.mp.weixin.qq.com', path: '/' }] as CookieParam[];
-    (vscode.window as any).activeTextEditor = {
-      document: {
-        getText: () => '# Title',
-        fileName: '/tmp/demo.md',
-      },
-    };
-    mockWeChatService.getAuthInfo.mockReturnValue(null);
-    mockChromeCdpService.startFirstTimeLogin.mockResolvedValue(cookies);
-    mockWeChatService.checkAuthWithCookies.mockResolvedValue({
-      isAuthenticated: true,
-      authInfo: { nickName: 'Tester' },
-    });
-    mockWeChatService.createDraft.mockResolvedValue({
-      success: true,
-      draftUrl: 'https://example.com/draft',
-    });
-
-    await registeredCommands.get('multipost.uploadToWeChat')!();
-
-    expect(mockChromeCdpService.startFirstTimeLogin).toHaveBeenCalled();
-    expect(mockWeChatService.checkAuthWithCookies).toHaveBeenCalledWith(cookies);
-  });
-
-  it('should create draft in browser when CDP session is active', async () => {
-    await activate(mockContext);
-    (vscode.window as any).activeTextEditor = {
-      document: {
-        getText: () => '# Title',
-        fileName: '/tmp/demo.md',
-      },
-    };
-    mockWeChatService.getAuthInfo.mockReturnValue({ nickName: 'Tester' });
-    mockWeChatService.checkAuth.mockResolvedValue({ isAuthenticated: true });
-    mockChromeCdpService.isSessionActive.mockReturnValue(true);
-    mockChromeCdpService.createDraftInBrowser.mockResolvedValue('https://example.com/browser-draft');
-
-    await registeredCommands.get('multipost.uploadToWeChat')!();
-
-    expect(mockChromeCdpService.createDraftInBrowser).toHaveBeenCalledWith(
-      'Extracted Title',
-      'Default Author',
-      '<p>rendered</p>',
-      'rendered'
-    );
-  });
 });
