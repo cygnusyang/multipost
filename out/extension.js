@@ -105,6 +105,12 @@ async function activate(context) {
         });
         context.subscriptions.push(disposable);
         log('Command registered: multipost.uploadToWeChat');
+        disposable = vscode.commands.registerCommand('multipost.configurePublishOptions', async () => {
+            log('Command invoked: multipost.configurePublishOptions');
+            await configurePublishOptions();
+        });
+        context.subscriptions.push(disposable);
+        log('Command registered: multipost.configurePublishOptions');
         log('All commands registered successfully');
         log('=== MultiPost extension activation completed successfully ===');
     }
@@ -120,6 +126,76 @@ async function activate(context) {
         throw error;
     }
 }
+async function promptBoolean(title, currentValue) {
+    const picked = await vscode.window.showQuickPick([
+        { label: '是', value: true },
+        { label: '否', value: false },
+    ], {
+        title,
+        placeHolder: currentValue ? '当前: 是' : '当前: 否',
+        ignoreFocusOut: true,
+    });
+    return picked?.value;
+}
+async function configurePublishOptions() {
+    const current = settingsService.getSettings();
+    const defaultAuthor = await vscode.window.showInputBox({
+        title: 'MultiPost 配置',
+        prompt: '默认作者名',
+        value: current.defaultAuthor,
+        ignoreFocusOut: true,
+    });
+    if (defaultAuthor === undefined) {
+        return;
+    }
+    const defaultCollection = await vscode.window.showInputBox({
+        title: 'MultiPost 配置',
+        prompt: '默认合集名',
+        value: current.defaultCollection,
+        ignoreFocusOut: true,
+    });
+    if (defaultCollection === undefined) {
+        return;
+    }
+    const digestLengthInput = await vscode.window.showInputBox({
+        title: 'MultiPost 配置',
+        prompt: '摘要长度（字符数）',
+        value: String(current.digestLength),
+        ignoreFocusOut: true,
+        validateInput: (value) => {
+            const parsed = Number(value);
+            if (!Number.isInteger(parsed) || parsed < 0) {
+                return '请输入大于等于 0 的整数';
+            }
+            return undefined;
+        },
+    });
+    if (digestLengthInput === undefined) {
+        return;
+    }
+    const declareOriginal = await promptBoolean('默认开启原创声明', current.declareOriginal);
+    if (declareOriginal === undefined) {
+        return;
+    }
+    const enableAppreciation = await promptBoolean('默认开启赞赏', current.enableAppreciation);
+    if (enableAppreciation === undefined) {
+        return;
+    }
+    const publishDirectly = await promptBoolean('默认直接发布（否则保存草稿）', current.publishDirectly);
+    if (publishDirectly === undefined) {
+        return;
+    }
+    const updated = {
+        defaultAuthor: defaultAuthor.trim(),
+        defaultCollection: defaultCollection.trim(),
+        digestLength: Number(digestLengthInput),
+        declareOriginal,
+        enableAppreciation,
+        publishDirectly,
+    };
+    await settingsService.updateSettings(updated);
+    vscode.window.showInformationMessage('MultiPost 发布选项已保存');
+}
 /**
  * Handle fully automated Playwright upload workflow:
  * - Ensure authenticated (login if needed)
@@ -128,6 +204,7 @@ async function activate(context) {
 async function handlePlaywrightFullAutomatedUpload(markdown, title, progress) {
     try {
         log('Starting Playwright upload workflow');
+        const publishSettings = settingsService.getSettings();
         // Step 1: Check if we need to login
         if (!playwrightService.isSessionActive()) {
             // Check if we have a saved login state
@@ -142,14 +219,14 @@ async function handlePlaywrightFullAutomatedUpload(markdown, title, progress) {
             }
         }
         // Step 2: Create draft with full options
-        const draftUrl = await playwrightService.createDraftInBrowser(title, settingsService.getDefaultAuthor() || 'Unknown', markdown, // 传递原始 markdown 而不是 HTML
-        markdown.slice(0, 120), // 提取前120个字符作为摘要
-        true, // 原创声明
-        true, // 赞赏功能
-        '智能体' // 默认合集
-        );
-        vscode.window.showInformationMessage('Draft created successfully in Chrome via Playwright!');
-        log(`Draft created successfully via Playwright: ${draftUrl}`);
+        const draftUrl = await playwrightService.createDraftInBrowser(title, publishSettings.defaultAuthor || 'Unknown', markdown, // 传递原始 markdown 而不是 HTML
+        markdown.slice(0, publishSettings.digestLength), // 提取前N个字符作为摘要
+        publishSettings.declareOriginal, publishSettings.enableAppreciation, publishSettings.defaultCollection, publishSettings.publishDirectly);
+        const successMessage = publishSettings.publishDirectly
+            ? 'Article published successfully in Chrome via Playwright!'
+            : 'Draft created successfully in Chrome via Playwright!';
+        vscode.window.showInformationMessage(successMessage);
+        log(`${successMessage} URL: ${draftUrl}`);
     }
     catch (error) {
         vscode.window.showErrorMessage(`Playwright upload failed: ${error.message}`);

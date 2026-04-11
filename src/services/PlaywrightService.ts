@@ -532,11 +532,13 @@ export class PlaywrightService {
       // Step 18: Set original declaration if enabled (following test.py logic)
       if (isOriginal) {
         this.log('[DEBUG] Step 18: Setting original declaration');
-        await this.clickAndStabilize(this.authenticatedPage.getByText('原创').nth(2), this.authenticatedPage);
-        await this.clickAndStabilize(this.authenticatedPage.getByText('文字原创'), this.authenticatedPage);
+        await this.authenticatedPage.getByText('原创').nth(2).click();
+        await this.waitForUiSettled(this.authenticatedPage);
+        await this.authenticatedPage.getByText('文字原创').click();
+        await this.waitForUiSettled(this.authenticatedPage);
         await this.authenticatedPage.locator('#js_original_edit_box').getByRole('textbox', { name: '请输入作者' }).click();
         await this.waitForUiSettled(this.authenticatedPage);
-        
+
         // Handle original agreement popup
         const popupPromise = this.authenticatedPage.waitForEvent('popup', { timeout: 10000 });
         await this.authenticatedPage.locator('.original_agreement').click();
@@ -553,53 +555,22 @@ export class PlaywrightService {
           .first();
         await originalDialog.waitFor({ state: 'visible', timeout: DIALOG_TIMEOUT_MS });
 
-        // Hover over confirm button to activate it
-        const originalConfirmButton = originalDialog.getByRole('button', { name: '确定' }).first();
-        await originalConfirmButton.waitFor({ state: 'visible', timeout: DIALOG_TIMEOUT_MS });
-
-        // Ensure the agreement checkbox is checked before confirming.
-        const agreementChecked = await originalDialog.evaluate((root) => {
-          const container = root as HTMLElement;
-          const allNodes = Array.from(container.querySelectorAll('*'));
-          const agreementNode = allNodes.find((node) =>
-            (node.textContent || '').includes('我已阅读并同意')
-          ) as HTMLElement | undefined;
-
-          if (!agreementNode) {
-            return true;
-          }
-
-          const nearestWrapper = agreementNode.closest('label,div') as HTMLElement | null;
-          const checkbox =
-            nearestWrapper?.querySelector('.weui-desktop-icon-checkbox') as HTMLElement | null ||
-            (container.querySelector('.weui-desktop-icon-checkbox') as HTMLElement | null);
-
-          if (!checkbox) {
-            return false;
-          }
-
-          const className = checkbox.className || '';
-          const ariaChecked = checkbox.getAttribute('aria-checked');
-          const isCheckedByClass = /(checked|selected|active|on)/i.test(className);
-          const isChecked = isCheckedByClass || ariaChecked === 'true';
-
-          if (!isChecked) {
-            checkbox.click();
-          }
-
-          const postClickClass = checkbox.className || '';
-          const postClickAria = checkbox.getAttribute('aria-checked');
-          return /(checked|selected|active|on)/i.test(postClickClass) || postClickAria === 'true';
-        });
-
-        if (!agreementChecked) {
-          throw new Error('Original agreement checkbox is not checked. Stop before clicking 确定.');
+        // Keep behavior aligned with playwright-wechat.py but avoid toggling off:
+        // click checkbox only when it is currently unchecked.
+        const originalAgreementCheckbox = originalDialog.locator('.weui-desktop-icon-checkbox').first();
+        await originalAgreementCheckbox.waitFor({ state: 'visible', timeout: DIALOG_TIMEOUT_MS });
+        const checkboxClass = (await originalAgreementCheckbox.getAttribute('class')) || '';
+        const ariaChecked = await originalAgreementCheckbox.getAttribute('aria-checked');
+        const isChecked = /(checked|selected|active|on)/i.test(checkboxClass) || ariaChecked === 'true';
+        if (!isChecked) {
+          await originalAgreementCheckbox.click();
+          await this.waitForUiSettled(this.authenticatedPage);
+          this.log('[DEBUG] Original agreement checkbox checked');
+        } else {
+          this.log('[DEBUG] Original agreement checkbox already checked, skipping click');
         }
 
-        this.log('[DEBUG] Original agreement checkbox verified');
-        await originalConfirmButton.hover();
-        await this.authenticatedPage.waitForTimeout(BUTTON_ACTIVATION_DELAY_MS);
-        await originalConfirmButton.click();
+        await originalDialog.getByRole('button', { name: '确定' }).first().click();
         await originalDialog.waitFor({ state: 'hidden', timeout: DIALOG_TIMEOUT_MS });
         this.log('[DEBUG] Original declaration set');
       }
@@ -607,10 +578,8 @@ export class PlaywrightService {
       // Step 19: Set appreciation if enabled (following test.py logic)
       if (enableAppreciation) {
         this.log('[DEBUG] Step 19: Setting appreciation');
-        await this.clickAndStabilize(
-          this.authenticatedPage.locator('#js_reward_setting_area').getByText(/不开启|赞赏作者|公益捐赠/),
-          this.authenticatedPage
-        );
+        await this.authenticatedPage.locator('#js_reward_setting_area').getByText('不开启').click();
+        await this.waitForUiSettled(this.authenticatedPage);
 
         const rewardDialog = this.authenticatedPage
           .locator('.weui-desktop-dialog:visible, .dialog_wrp:visible, .popover_dialog:visible')
@@ -618,20 +587,18 @@ export class PlaywrightService {
           .first();
         await rewardDialog.waitFor({ state: 'visible', timeout: DIALOG_TIMEOUT_MS });
 
-        const accountInput = rewardDialog.getByRole('textbox', { name: /选择或搜索赞赏账户|赞赏账户/ }).first();
-        if (await accountInput.isVisible({ timeout: 1500 }).catch(() => false)) {
-          await accountInput.click();
-          await accountInput.press('ArrowDown');
-          await accountInput.press('Enter');
-        }
-
-        const confirmButton = rewardDialog.getByRole('button', { name: '确定' }).first();
-        await confirmButton.waitFor({ state: 'visible', timeout: DIALOG_TIMEOUT_MS });
-        if (!(await confirmButton.isEnabled())) {
-          await confirmButton.hover();
-          await this.authenticatedPage.waitForTimeout(BUTTON_ACTIVATION_DELAY_MS);
-        }
-        await confirmButton.click();
+        // Align with playwright-wechat.py sequence
+        await rewardDialog.getByRole('textbox', { name: '选择或搜索赞赏账户' }).click();
+        await this.waitForUiSettled(this.authenticatedPage);
+        await rewardDialog.getByText('赞赏类型').click();
+        await this.waitForUiSettled(this.authenticatedPage);
+        await this.authenticatedPage.locator('#vue_app').getByText('赞赏账户', { exact: true }).click();
+        await this.waitForUiSettled(this.authenticatedPage);
+        await rewardDialog.getByText('赞赏自动回复').click();
+        await this.waitForUiSettled(this.authenticatedPage);
+        await rewardDialog.locator('.weui-desktop-icon-checkbox').first().click();
+        await this.waitForUiSettled(this.authenticatedPage);
+        await rewardDialog.getByRole('button', { name: '确定' }).first().click();
         await rewardDialog.waitFor({ state: 'hidden', timeout: DIALOG_TIMEOUT_MS });
         this.log('[DEBUG] Appreciation enabled');
       }
