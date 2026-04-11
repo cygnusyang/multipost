@@ -3,6 +3,8 @@ import * as vscode from 'vscode';
 
 const LOGIN_TIMEOUT_MS = 120000; // 2 minutes timeout for user to scan QR
 const POLL_INTERVAL_MS = 2000; // Check every 2 seconds for login completion
+const BUTTON_ACTIVATION_DELAY_MS = 500; // Delay for button activation after hover
+const INTERACTION_TIMEOUT_MS = 5000; // Timeout for UI interactions
 
 export class PlaywrightService {
   private outputChannel: vscode.OutputChannel;
@@ -347,11 +349,12 @@ export class PlaywrightService {
         await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 30000 });
         await this.authenticatedPage.locator('.weui-desktop-icon-checkbox').click();
         await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 30000 });
+
         
-        // Hover over the confirm button to activate it
+        // Hover over the confirm button button to activate it
         const confirmButton = this.authenticatedPage.getByRole('button', { name: '确定' });
         await confirmButton.hover();
-        await this.authenticatedPage.waitForTimeout(500); // Wait for button to activate
+        await this.authenticatedPage.waitForTimeout(500); // Waitress button to activate
         await confirmButton.click();
         await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 30000 });
         this.log('[DEBUG] Appreciation enabled');
@@ -408,6 +411,9 @@ export class PlaywrightService {
       } else {
         this.log('[DEBUG] Step 21: Saving as draft');
         const saveButton = this.authenticatedPage.getByRole('button', { name: '保存为草稿' });
+        await saveButton.hover();
+        await this.authenticatedPage.waitForTimeout(500); // Waitress button to activate
+        await saveButton.click();        
         await saveButton.waitFor({ timeout: 60000 });
         await saveButton.click();
         await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 60000 });

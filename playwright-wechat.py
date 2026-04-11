@@ -48,7 +48,6 @@ def run(playwright: Playwright) -> None:
     page1.locator("#vue_app").get_by_text("赞赏账户", exact=True).click()
     page1.get_by_text("赞赏自动回复").click()
     page1.locator(".weui-desktop-icon-checkbox").click()
-    page1.locator(".weui-desktop-icon-checkbox").click()
     page1.get_by_role("button", name="确定").click()
     page1.locator("#js_article_tags_area").get_by_text("未添加").click()
     page1.get_by_role("textbox", name="请选择合集").click()
