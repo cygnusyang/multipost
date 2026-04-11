@@ -48,29 +48,54 @@ export class PlaywrightService {
   }
 
   private async renderMermaidToSvgDataUrl(diagramCode: string): Promise<string | null> {
-    if (!this.context) {
+    if (!this.authenticatedPage) {
       return null;
     }
 
-    const renderPage = await this.context.newPage();
-    try {
-      await renderPage.setContent('<html><body><div id="root"></div></body></html>');
-      await renderPage.addScriptTag({ url: 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js' });
+    const page = this.authenticatedPage;
 
-      const svg = await renderPage.evaluate(async (code) => {
+    try {
+      const hasMermaid = await page.evaluate(() => typeof (window as any).mermaid !== 'undefined');
+      if (!hasMermaid) {
+        try {
+          await page.addScriptTag({ url: 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js' });
+        } catch (loadError) {
+          this.log(`Failed to load Mermaid script in current page: ${loadError}`, 'warn');
+          return null;
+        }
+      }
+
+      const svg = await page.evaluate(async (code) => {
         const mermaidApi = (window as any).mermaid;
+        if (!mermaidApi) {
+          return null;
+        }
+
         mermaidApi.initialize({ startOnLoad: false, securityLevel: 'loose' });
         const renderId = `mp-mermaid-${Date.now()}`;
-        const result = await mermaidApi.render(renderId, code);
-        return result.svg as string;
+        const container = document.createElement('div');
+        container.style.position = 'fixed';
+        container.style.left = '-99999px';
+        container.style.top = '0';
+        container.style.opacity = '0';
+        document.body.appendChild(container);
+
+        try {
+          const result = await mermaidApi.render(renderId, code, container);
+          return result.svg as string;
+        } finally {
+          container.remove();
+        }
       }, diagramCode);
+
+      if (!svg) {
+        return null;
+      }
 
       return `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
     } catch (error) {
       this.log(`Failed to render Mermaid diagram, fallback to text block: ${error}`, 'warn');
       return null;
-    } finally {
-      await renderPage.close();
     }
   }
 
@@ -528,30 +553,50 @@ export class PlaywrightService {
           .first();
         await originalDialog.waitFor({ state: 'visible', timeout: DIALOG_TIMEOUT_MS });
 
-        // Ensure the agreement checkbox is checked before confirming.
-        const agreementText = originalDialog.getByText(/我已阅读并同意/).first();
-        if (await agreementText.isVisible({ timeout: 1500 }).catch(() => false)) {
-          let agreementCheckbox = agreementText
-            .locator('xpath=ancestor::*[self::label or self::div][1]')
-            .locator('.weui-desktop-icon-checkbox')
-            .first();
-
-          if ((await agreementCheckbox.count()) === 0) {
-            agreementCheckbox = originalDialog.locator('.weui-desktop-icon-checkbox').first();
-          }
-
-          const className = (await agreementCheckbox.getAttribute('class')) || '';
-          const isChecked = /checked|selected|active/.test(className);
-          if (!isChecked) {
-            await agreementCheckbox.click();
-            await this.waitForUiSettled(this.authenticatedPage);
-            this.log('[DEBUG] Original agreement checkbox checked');
-          }
-        }
-
         // Hover over confirm button to activate it
         const originalConfirmButton = originalDialog.getByRole('button', { name: '确定' }).first();
         await originalConfirmButton.waitFor({ state: 'visible', timeout: DIALOG_TIMEOUT_MS });
+
+        // Ensure the agreement checkbox is checked before confirming.
+        const agreementChecked = await originalDialog.evaluate((root) => {
+          const container = root as HTMLElement;
+          const allNodes = Array.from(container.querySelectorAll('*'));
+          const agreementNode = allNodes.find((node) =>
+            (node.textContent || '').includes('我已阅读并同意')
+          ) as HTMLElement | undefined;
+
+          if (!agreementNode) {
+            return true;
+          }
+
+          const nearestWrapper = agreementNode.closest('label,div') as HTMLElement | null;
+          const checkbox =
+            nearestWrapper?.querySelector('.weui-desktop-icon-checkbox') as HTMLElement | null ||
+            (container.querySelector('.weui-desktop-icon-checkbox') as HTMLElement | null);
+
+          if (!checkbox) {
+            return false;
+          }
+
+          const className = checkbox.className || '';
+          const ariaChecked = checkbox.getAttribute('aria-checked');
+          const isCheckedByClass = /(checked|selected|active|on)/i.test(className);
+          const isChecked = isCheckedByClass || ariaChecked === 'true';
+
+          if (!isChecked) {
+            checkbox.click();
+          }
+
+          const postClickClass = checkbox.className || '';
+          const postClickAria = checkbox.getAttribute('aria-checked');
+          return /(checked|selected|active|on)/i.test(postClickClass) || postClickAria === 'true';
+        });
+
+        if (!agreementChecked) {
+          throw new Error('Original agreement checkbox is not checked. Stop before clicking 确定.');
+        }
+
+        this.log('[DEBUG] Original agreement checkbox verified');
         await originalConfirmButton.hover();
         await this.authenticatedPage.waitForTimeout(BUTTON_ACTIVATION_DELAY_MS);
         await originalConfirmButton.click();
