@@ -12,7 +12,8 @@
 - ✅ **Full Markdown / GFM Support** - Complete Markdown and GitHub Flavored Markdown support
 - ✅ **Mermaid Diagram Rendering** - Automatic rendering and upload of Mermaid diagrams
 - ✅ **Code Highlighting** - Beautiful syntax highlighting using highlight.js
-- ✅ **WeChat Style Theme** - Default WeChat official account style theme
+- ✅ **Content Style Customization** - Theme presets (classic, magazine, minimal) with customizable colors and fonts
+- ✅ **Persistent Login State** - Login session persists across VSCode restarts, no need to scan QR every time
 - ✅ **QR Code Login** - Mobile QR code login (no developer资质/AppID required)
 - ✅ **One-Click Publish** - Direct publish to official account draft box
 - ✅ **Image Upload** - Automatic upload of all images to WeChat CDN
@@ -32,13 +33,13 @@
 
 All commands are prefixed with `MultiPost: ` in the command palette.
 
-### Method 1: CDP Fully Automated (Recommended)
+### Method 1: Playwright Automated (Recommended)
 
 1. Open a `.md` Markdown file
 2. Open Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`)
-3. Type `CDP Fully Automated Upload` and execute
+3. Type `Upload to WeChat Official Accounts` and execute
 4. **If not logged in**: Chrome will open automatically, scan QR code to login, save credentials, and upload
-5. **If already logged in**: Directly create draft in browser
+5. **If already logged in**: Directly create draft in browser (login state persists across restarts)
 6. Mermaid diagrams are automatically rendered to images and uploaded to WeChat CDN
 
 ### Method 2: Manual Cookie Mode
@@ -48,6 +49,7 @@ All commands are prefixed with `MultiPost: ` in the command palette.
 
 ### Other Commands
 
+- **Configure MultiPost** - Configure default author, original declaration, appreciation, collection, and content style
 - **Preview MultiPost Format** - Preview converted WeChat HTML format in sidebar
 - **Logout MultiPost** - Clear saved login credentials
 
@@ -59,7 +61,7 @@ All commands are prefixed with `MultiPost: ` in the command palette.
 
 ## ⚙️ Configuration
 
-Search for `wechatPublisher` in VSCode settings:
+Search for `wechatPublisher` in VSCode settings or use `Configure MultiPost` command:
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
@@ -69,6 +71,12 @@ Search for `wechatPublisher` in VSCode settings:
 | `wechatPublisher.enableAppreciation` | `boolean` | `true` | Enable appreciation by default |
 | `wechatPublisher.defaultCollection` | `string` | `"智能体"` | Default collection name used in WeChat |
 | `wechatPublisher.publishDirectly` | `boolean` | `true` | Publish directly by default; disable to save as draft |
+| `wechatPublisher.contentThemePreset` | `string` | `"classic"` | Content theme preset: classic, magazine, or minimal |
+| `wechatPublisher.contentBodyFontSize` | `number` | `16` | Body font size in pixels (12-22) |
+| `wechatPublisher.contentLineHeight` | `number` | `1.85` | Body line height (1.2-2.4) |
+| `wechatPublisher.contentTextColor` | `string` | `"#1f2329"` | Body text color in HEX format |
+| `wechatPublisher.contentHeadingColor` | `string` | `"#0f172a"` | Heading text color in HEX format |
+| `wechatPublisher.contentLinkColor` | `string` | `"#0969da"` | Link and emphasis color in HEX format |
 
 ## 📝 Notes
 
