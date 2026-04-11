@@ -130,8 +130,16 @@ async function handlePlaywrightFullAutomatedUpload(markdown, title, progress) {
         log('Starting Playwright upload workflow');
         // Step 1: Check if we need to login
         if (!playwrightService.isSessionActive()) {
-            progress.report({ message: 'Waiting for QR code scan...' });
-            await playwrightService.startFirstTimeLogin();
+            // Check if we have a saved login state
+            const hasSavedLogin = await playwrightService.hasSavedLogin();
+            if (hasSavedLogin) {
+                progress.report({ message: 'Restoring saved login session...' });
+                await playwrightService.restoreLogin();
+            }
+            else {
+                progress.report({ message: 'Waiting for QR code scan...' });
+                await playwrightService.startFirstTimeLogin();
+            }
         }
         // Step 2: Create draft with full options
         const draftUrl = await playwrightService.createDraftInBrowser(title, settingsService.getDefaultAuthor() || 'Unknown', markdown, // 传递原始 markdown 而不是 HTML

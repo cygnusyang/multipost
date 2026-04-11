@@ -16,6 +16,8 @@ describe('extension', () => {
 
   const mockGetDefaultAuthor = jest.fn(() => 'Default Author');
   const mockStartFirstTimeLogin = jest.fn().mockResolvedValue(undefined);
+  const mockHasSavedLogin = jest.fn().mockResolvedValue(false);
+  const mockRestoreLogin = jest.fn().mockResolvedValue(undefined);
   const mockCreateDraftInBrowser = jest.fn().mockResolvedValue('https://example.com/draft');
   const mockIsSessionActive = jest.fn(() => false);
   const mockClose = jest.fn().mockResolvedValue(undefined);
@@ -55,6 +57,8 @@ describe('extension', () => {
 
     (PlaywrightService as jest.Mock).mockImplementation(() => ({
       startFirstTimeLogin: mockStartFirstTimeLogin,
+      hasSavedLogin: mockHasSavedLogin,
+      restoreLogin: mockRestoreLogin,
       createDraftInBrowser: mockCreateDraftInBrowser,
       isSessionActive: mockIsSessionActive,
       close: mockClose,

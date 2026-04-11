@@ -425,8 +425,8 @@ export class PlaywrightService {
       // Step 19: Set appreciation if enabled (following test.py logic)
       if (enableAppreciation) {
         this.log('[DEBUG] Step 19: Setting appreciation');
-        await this.authenticatedPage.locator('#js_reward_setting_area').getByText('不开启').click();
-        await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 30000 });
+        // await this.authenticatedPage.locator('#js_reward_setting_area').getByText('不开启').click();
+        // await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 30000 });
         await this.authenticatedPage.getByRole('textbox', { name: '选择或搜索赞赏账户' }).click();
         await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 30000 });
         await this.authenticatedPage.getByText('赞赏类型').click();
@@ -454,15 +454,33 @@ export class PlaywrightService {
       if (defaultCollection) {
         this.log(`[DEBUG] Step 20: Setting collection: ${defaultCollection}`);
         await this.authenticatedPage.locator('#js_article_tags_area').getByText('未添加').click();
-        await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 30000 });
-        await this.authenticatedPage.getByRole('textbox', { name: '请选择合集' }).click();
-        await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 30000 });
-        await this.authenticatedPage.getByText(defaultCollection).click();
-        await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 30000 });
-        await this.authenticatedPage.getByText('每篇文章最多添加1个合集').click();
-        await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 30000 });
-        await this.authenticatedPage.getByRole('button', { name: '确认' }).click();
-        await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 30000 });
+
+        const collectionDialog = this.authenticatedPage
+          .locator('.weui-desktop-dialog:visible, .dialog_wrp:visible, .popover_dialog:visible')
+          .filter({ hasText: '每篇文章最多添加1个合集' })
+          .first();
+        await collectionDialog.waitFor({ state: 'visible', timeout: 30000 });
+
+        const collectionInput = collectionDialog.getByRole('textbox', { name: '请选择合集' }).first();
+        await collectionInput.waitFor({ state: 'visible', timeout: 30000 });
+        await collectionInput.click();
+
+        try {
+          // Prefer exact match by collection name when it exists.
+          const targetCollection = collectionDialog.getByText(defaultCollection, { exact: true }).first();
+          await targetCollection.waitFor({ state: 'visible', timeout: 2500 });
+          await targetCollection.click();
+        } catch (selectByNameError) {
+          // Fallback: select the first dropdown option.
+          this.log(`[DEBUG] Collection "${defaultCollection}" not found, selecting first option: ${selectByNameError}`, 'warn');
+          await collectionInput.press('ArrowDown');
+          await collectionInput.press('Enter');
+        }
+
+        const collectionConfirmButton = collectionDialog.getByRole('button', { name: '确认' }).first();
+        await collectionConfirmButton.waitFor({ state: 'visible', timeout: 30000 });
+        await collectionConfirmButton.click();
+        await collectionDialog.waitFor({ state: 'hidden', timeout: 30000 });
         this.log(`[DEBUG] Collection set: ${defaultCollection}`);
       }
 
