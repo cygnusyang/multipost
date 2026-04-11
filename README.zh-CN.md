@@ -1,21 +1,26 @@
-# MultiPost - 微信公众号发布工具
+[English Version](README.md)
 
-VS Code 扩展 - 将 Markdown 文件一键发布到微信公众号，支持 Mermaid 图表自动渲染上传，支持 Chrome CDP 全自动登录+发布。
+<div align="center">
+  <br />
+  <img src="media/icon.png" alt="MultiPost Logo" width="128" height="128">
+  <h1 style="border-bottom: none;">🚀 MultiPost - 微信公众号发布工具</h1>
+  <p style="font-size: 1.2em;">从 VSCode 一键发布 Markdown 到微信公众号</p>
+</div>
 
-## 功能特性
+## ✨ 功能特性
 
-- ✅ 完整支持 Markdown / GFM
-- ✅ 支持 Mermaid 图表自动渲染上传
-- ✅ 代码高亮（highlight.js）
-- ✅ 默认微信样式主题
-- ✅ 手机扫码登录（不需要开发者资质/AppID）
-- ✅ 一键发布到公众号草稿箱
-- ✅ 自动上传所有图片到微信 CDN
-- ✅ VSCode 安全存储认证信息
+- ✅ **完整 Markdown 支持** - 完全支持 Markdown 和 GitHub Flavored Markdown
+- ✅ **Mermaid 图表渲染** - 自动渲染和上传 Mermaid 图表
+- ✅ **代码高亮** - 使用 highlight.js 实现美观的语法高亮
+- ✅ **微信样式主题** - 默认微信公众号风格主题
+- ✅ **扫码登录** - 手机扫码登录（无需开发者资质/AppID）
+- ✅ **一键发布** - 直接发布到公众号草稿箱
+- ✅ **图片上传** - 自动上传所有图片到微信 CDN
+- ✅ **安全存储** - 认证信息安全存储在 VSCode 密钥链中
 
-## 安装
+## 📦 安装
 
-从 VSIX 安装：
+### 从 VSIX 文件安装
 
 1. 下载 `multipost-<version>.vsix` 文件
 2. 打开 VSCode 扩展面板 (Cmd+Shift+X / Ctrl+Shift+X)
@@ -23,19 +28,17 @@ VS Code 扩展 - 将 Markdown 文件一键发布到微信公众号，支持 Merm
 4. 选择 **"从 VSIX 安装..."**
 5. 选择 `.vsix` 文件，重启 VSCode
 
-## 使用方法
+## 🚀 使用方法
 
 所有命令都以 `MultiPost: ` 前缀显示在命令面板中。
 
-### 方式一：CDP 全自动推荐（推荐）
-
-**CDP Fully Automated Upload**
+### 方式一：CDP 全自动（推荐）
 
 1. 打开 `.md` Markdown 文件
 2. 打开命令面板（`Cmd+Shift+P` / `Ctrl+Shift+P`）
 3. 输入 `CDP Fully Automated Upload` 执行
-4. 如果未登录：会自动打开 Chrome，扫码登录后自动保存凭据并上传
-5. 如果已登录：直接在浏览器中创建草稿
+4. **未登录时**：会自动打开 Chrome，扫码登录后自动保存凭据并上传
+5. **已登录时**：直接在浏览器中创建草稿
 6. Mermaid 图表会自动渲染为图片并上传到微信 CDN
 
 ### 方式二：手动 Cookie 模式
@@ -54,21 +57,27 @@ VS Code 扩展 - 将 Markdown 文件一键发布到微信公众号，支持 Merm
 2. 打开命令面板，输入 `Preview MultiPost Format`
 3. 会在侧边打开预览窗口，显示微信公众号格式的预览
 
-## 配置
+## ⚙️ 配置
 
 可以在 VSCode 设置中搜索 `wechatPublisher` 进行配置：
 
-- `wechatPublisher.defaultAuthor` - 默认作者名（发布时使用）
-- `wechatPublisher.autoOpenDraftAfterPublish` - 发布成功后是否自动打开草稿页面（默认：true）
+| 设置项 | 类型 | 默认值 | 描述 |
+|---------|------|---------|-------------|
+| `wechatPublisher.defaultAuthor` | `string` | `""` | 发布时使用的默认作者名 |
+| `wechatPublisher.digestLength` | `number` | `120` | 从 Markdown 内容中提取的摘要长度 |
+| `wechatPublisher.declareOriginal` | `boolean` | `true` | 是否默认声明原创 |
+| `wechatPublisher.enableAppreciation` | `boolean` | `true` | 是否默认开启赞赏功能 |
+| `wechatPublisher.defaultCollection` | `string` | `"智能体"` | 微信公众号文章的默认合集名称 |
+| `wechatPublisher.publishDirectly` | `boolean` | `true` | 是否默认直接发布，禁用则保存为草稿 |
 
-## 注意事项
+## 📝 注意事项
 
-- 本插件使用网页版公众号后台的 Cookie 认证方式，不需要公众号开发者资质
+- 本插件使用微信公众号网页版的 Cookie 认证方式，不需要公众号开发者资质
 - Mermaid 图表会被渲染为 PNG 图片上传到微信 CDN
 - 所有外部图片都会自动上传到微信 CDN
 - 认证信息安全保存在 VSCode 密钥存储中，不会明文存储
 
-## 开发
+## 🛠️ 开发
 
 ```bash
 # 安装依赖
@@ -87,6 +96,10 @@ npm run vscode:prepublish
 npx vsce package
 ```
 
-## 许可
+## 📄 许可
 
 MIT
+
+---
+
+Made with ❤️ by cygnus
