@@ -1,10 +1,8 @@
 import * as vscode from 'vscode';
-import { WeChatService } from './services/WeChatService';
 import { SettingsService } from './services/SettingsService';
 import { PlaywrightService } from './services/PlaywrightService';
 import { extractTitle } from './utils/extractTitle';
 
-let weChatService: WeChatService;
 let settingsService: SettingsService;
 let playwrightService: PlaywrightService;
 let outputChannel: vscode.OutputChannel;
@@ -39,21 +37,19 @@ export async function activate(context: vscode.ExtensionContext) {
   try {
     log('Step 1: Initializing services...');
     // Initialize services
-    weChatService = new WeChatService(context.secrets, outputChannel);
-    settingsService = new SettingsService(context);
-    const storagePath = context.globalStorageUri?.fsPath || context.extensionPath;
-    playwrightService = new PlaywrightService(outputChannel, storagePath);
+    settingsService = new SettingsService();
+    playwrightService = new PlaywrightService(outputChannel);
     log('Services initialized successfully');
 
     log('Step 2: Registering commands...');
     log(`Available vscode.commands: ${typeof vscode.commands}`);
-    
+
     // Register commands
     let disposable = vscode.commands.registerCommand(
       'multipost.logoutWeChat',
       async () => {
         log('Command invoked: multipost.logoutWeChat');
-        weChatService.clearAuth();
+        await playwrightService.close();
         vscode.window.showInformationMessage('Logged out from MultiPost');
         log('User logged out successfully');
       }
@@ -91,16 +87,9 @@ export async function activate(context: vscode.ExtensionContext) {
       }
     );
     context.subscriptions.push(disposable);
-    log('Command registered: multipost.uploadToWeChatPlaywright');
+    log('Command registered: multipost.uploadToWeChat');
 
     log('All commands registered successfully');
-
-    log('Step 3: Loading saved authentication from storage in background...');
-    void weChatService.loadAuthFromStorage().then(() => {
-      log('Saved auth loaded');
-    }).catch((error) => {
-      log(`Background auth load failed: ${(error as Error).message}`, 'warn');
-    });
 
     log('=== MultiPost extension activation completed successfully ===');
   } catch (error) {
@@ -118,32 +107,9 @@ export async function activate(context: vscode.ExtensionContext) {
   }
 }
 
-
-/**
- * Process markdown content and get HTML ready for upload
- * Handles mermaid diagram rendering and image uploading
- */
-async function processMarkdownContent(
-  markdown: string
-): Promise<{ html: string; errors: string[] }> {
-  log('Starting markdown processing...');
-  const processMarkdownModule = await import('./utils/processMarkdown');
-  const { processMarkdownForUpload } = processMarkdownModule;
-  const result = await processMarkdownForUpload(markdown, weChatService);
-
-  if (result.errors.length > 0) {
-    vscode.window.showWarningMessage(`Processing completed with ${result.errors.length} errors: ${result.errors[0]}`);
-    log(`Warnings during processing: ${result.errors.length} errors`, 'warn');
-    result.errors.forEach(err => log(`  - ${err}`, 'warn'));
-  }
-
-  return result;
-}
-
 /**
  * Handle fully automated Playwright upload workflow:
  * - Ensure authenticated (login if needed)
- * - Process markdown (render mermaid, upload images)
  * - Create draft in browser via Playwright automation
  */
 async function handlePlaywrightFullAutomatedUpload(
@@ -154,25 +120,21 @@ async function handlePlaywrightFullAutomatedUpload(
   try {
     log('Starting Playwright upload workflow');
 
-    // Step 1: Process markdown (render mermaid, upload images)
-    progress.report({ message: 'Processing markdown...' });
-    const { html } = await processMarkdownContent(markdown);
-
-    // Step 2: Create draft directly in browser via Playwright automation
-    progress.report({ message: 'Creating draft in Chrome (Playwright)...' });
-
-    // Check if we need to login
+    // Step 1: Check if we need to login
     if (!playwrightService.isSessionActive()) {
       progress.report({ message: 'Waiting for QR code scan...' });
       await playwrightService.startFirstTimeLogin();
     }
 
-    // Create draft
+    // Step 2: Create draft with full options
     const draftUrl = await playwrightService.createDraftInBrowser(
       title,
       settingsService.getDefaultAuthor() || 'Unknown',
-      html,
-      html.replace(/<[^>]*>/g, '').slice(0, 120) // 提取前120个字符作为摘要
+      markdown, // 传递原始 markdown 而不是 HTML
+      markdown.slice(0, 120), // 提取前120个字符作为摘要
+      true, // 原创声明
+      true, // 赞赏功能
+      '智能体' // 默认合集
     );
 
     vscode.window.showInformationMessage('Draft created successfully in Chrome via Playwright!');
@@ -187,4 +149,8 @@ async function handlePlaywrightFullAutomatedUpload(
 }
 
 
-export function deactivate() {}
+export function deactivate() {
+  if (playwrightService) {
+    playwrightService.close();
+  }
+}

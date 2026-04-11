@@ -36,21 +36,14 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.SettingsService = void 0;
 const vscode = __importStar(require("vscode"));
 class SettingsService {
-    constructor(context) {
-        this.context = context;
-    }
     getSettings() {
         const config = vscode.workspace.getConfiguration('wechatPublisher');
         return {
             defaultAuthor: config.get('defaultAuthor', ''),
-            autoOpenDraftAfterPublish: config.get('autoOpenDraftAfterPublish', true),
         };
     }
     getDefaultAuthor() {
         return this.getSettings().defaultAuthor;
-    }
-    shouldAutoOpenDraft() {
-        return this.getSettings().autoOpenDraftAfterPublish;
     }
 }
 exports.SettingsService = SettingsService;
