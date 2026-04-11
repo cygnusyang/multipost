@@ -1,6 +1,5 @@
 # Node dependencies
-# Exclude all node_modules - VSCode extensions don't need them
-node_modules/**
+# Keep runtime dependencies (packager will prune devDependencies).
 
 # Development tools
 .kilo/**

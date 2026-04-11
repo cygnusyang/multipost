@@ -131,14 +131,16 @@
     "test:playwright": "playwright test",
     "playwright:codegen": "playwright codegen"
   },
+  "dependencies": {
+    "markdown-it": "^14.1.0",
+    "playwright": "^1.59.1"
+  },
   "devDependencies": {
     "@types/jest": "^30.0.0",
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^20.10.0",
     "@types/vscode": "^1.80.0",
     "jest": "^30.3.0",
-    "markdown-it": "^14.1.0",
-    "playwright": "^1.59.1",
     "ts-jest": "^29.4.9",
     "typescript": "^5.9.3"
   }
