@@ -1,5 +1,7 @@
-import { chromium, Browser, Page } from 'playwright';
+import { chromium, BrowserContext, Page } from 'playwright';
 import * as vscode from 'vscode';
+import * as path from 'path';
+import * as os from 'os';
 
 const LOGIN_TIMEOUT_MS = 120000; // 2 minutes timeout for user to scan QR
 const POLL_INTERVAL_MS = 2000; // Check every 2 seconds for login completion
@@ -8,11 +10,16 @@ const INTERACTION_TIMEOUT_MS = 5000; // Timeout for UI interactions
 
 export class PlaywrightService {
   private outputChannel: vscode.OutputChannel;
-  private browser: Browser | null = null;
+  private context: BrowserContext | null = null;
   private authenticatedPage: Page | null = null;
+  private userDataDir: string;
 
   constructor(outputChannel: vscode.OutputChannel) {
     this.outputChannel = outputChannel;
+    // Set up user data directory for persistent login state
+    const homeDir = os.homedir();
+    this.userDataDir = path.join(homeDir, '.multipost', 'playwright-user-data');
+    this.log(`User data directory: ${this.userDataDir}`);
   }
 
   private log(message: string, level: 'info' | 'error' | 'warn' = 'info'): void {
@@ -27,12 +34,47 @@ export class PlaywrightService {
   }
 
   /**
-   * First-time login flow - launch Chrome, let user scan QR, extract cookies
+   * Check if there's an existing saved login state
    */
-  async startFirstTimeLogin(): Promise<void> {
-    this.log('Starting first-time login flow');
+  async hasSavedLogin(): Promise<boolean> {
+    this.log('Checking for saved login state...');
+    
+    try {
+      // Launch a temporary context to check if we have valid cookies
+      const context = await chromium.launchPersistentContext(this.userDataDir, {
+        headless: true,
+      });
+      
+      const page = await context.newPage();
+      await page.goto('https://mp.weixin.qq.com/', {
+        waitUntil: 'networkidle',
+      });
+      
+      // Check if we're already logged in
+      const isLoggedIn = await this.waitForLogin(page, 5000); // Short timeout for check
+      
+      await context.close();
+      
+      if (isLoggedIn) {
+        this.log('Found valid saved login state');
+        return true;
+      } else {
+        this.log('No valid saved login state found');
+        return false;
+      }
+    } catch (error) {
+      this.log(`Error checking saved login: ${error}`, 'error');
+      return false;
+    }
+  }
 
-    const browser = await chromium.launch({
+  /**
+   * Restore existing login session
+   */
+  async restoreLogin(): Promise<void> {
+    this.log('Restoring saved login session...');
+    
+    const context = await chromium.launchPersistentContext(this.userDataDir, {
       headless: false,
       args: [
         '--start-maximized',
@@ -42,7 +84,55 @@ export class PlaywrightService {
         '--disable-breakpad',
       ],
     });
-    this.browser = browser;
+    this.context = context;
+
+    try {
+      const page = await context.newPage();
+      this.log('New page opened, navigating to mp.weixin.qq.com');
+
+      await page.goto('https://mp.weixin.qq.com/', {
+        waitUntil: 'networkidle',
+      });
+
+      // Verify login is still valid
+      const isLoggedIn = await this.waitForLogin(page);
+      
+      if (!isLoggedIn) {
+        this.log('Saved login session is invalid', 'error');
+        await this.close();
+        throw new Error('Saved login session is invalid. Please login again.');
+      }
+
+      this.log('Login session restored successfully');
+
+      // Keep browser open for authenticated session
+      this.authenticatedPage = page;
+      this.log('Login restoration completed, browser kept open for authenticated operations');
+
+    } catch (error) {
+      this.log(`Error during login restoration: ${error}`, 'error');
+      await this.close();
+      throw error;
+    }
+  }
+
+  /**
+   * First-time login flow - launch Chrome, let user scan QR, extract cookies
+   */
+  async startFirstTimeLogin(): Promise<void> {
+    this.log('Starting first-time login flow');
+
+    const browser = await chromium.launchPersistentContext(this.userDataDir, {
+      headless: false,
+      args: [
+        '--start-maximized',
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--disable-crashpad',
+        '--disable-breakpad',
+      ],
+    });
+    this.context = browser;
 
     try {
       const page = await browser.newPage();
@@ -80,10 +170,10 @@ export class PlaywrightService {
   /**
    * Wait for login to complete by polling page for token presence
    */
-  private async waitForLogin(page: Page): Promise<boolean> {
+  private async waitForLogin(page: Page, timeout: number = LOGIN_TIMEOUT_MS): Promise<boolean> {
     const startTime = Date.now();
 
-    while (Date.now() - startTime < LOGIN_TIMEOUT_MS) {
+    while (Date.now() - startTime < timeout) {
       try {
         // Check if we have token in window.__wxjs_environment (WeChat MP sets this after login)
         const hasToken = await page.evaluate(() => {
@@ -166,7 +256,7 @@ export class PlaywrightService {
     defaultCollection?: string,
     publish?: boolean
   ): Promise<string> {
-    if (!this.browser || !this.authenticatedPage) {
+    if (!this.context || !this.authenticatedPage) {
       throw new Error('No authenticated browser session. Please login first.');
     }
 
@@ -437,13 +527,13 @@ export class PlaywrightService {
    * Close browser session
    */
   async close(): Promise<void> {
-    if (this.browser) {
+    if (this.context) {
       try {
-        await this.browser.close();
+        await this.context.close();
       } catch (error) {
-        this.log(`Error closing browser: ${error}`, 'error');
+        this.log(`Error closing browser context: ${error}`, 'error');
       }
-      this.browser = null;
+      this.context = null;
       this.authenticatedPage = null;
     }
   }
@@ -452,6 +542,6 @@ export class PlaywrightService {
    * Check if we have an active authenticated session
    */
   isSessionActive(): boolean {
-    return !!(this.browser && this.authenticatedPage);
+    return !!(this.context && this.authenticatedPage);
   }
 }
