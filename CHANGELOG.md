@@ -1,10 +1,19 @@
 # Change Log
 
+## 0.5.8 (2026-04-11)
+
+- 🐛 Fix: Original declaration logic - added "原创" and "文字原创" clicks, and original agreement popup handling
+- 🐛 Fix: Appreciation settings - updated to match test.py flow with complete appreciation account setup
+- 🐛 Fix: Article collection logic - added "每篇文章最多添加1个合集" confirmation step
+- 🐛 Fix: Publish flow - added group notification and scheduled publish options handling
+- 🔧 Improve: PlaywrightService - aligned all automation steps with test.py reference implementation
+
 ## 0.5.7 (2026-04-06)
 
 - 🐛 Fix: Article content field filling - improved selector strategy to match WeChat Official Accounts' new interface
 - 🐛 Fix: Author field filling - updated to use the same strategy as Python reference script
 - 🐛 Fix: Mermaid renderer - added null check for API response to handle network errors gracefully
+- 🚀 Improve: Content filling method - added support for ProseMirror editor and enhanced robustness
 
 ## 0.5.6 (2026-04-06)
 

@@ -1,7 +1,5 @@
 import { chromium, Browser, Page } from 'playwright';
 import * as vscode from 'vscode';
-import * as fs from 'fs';
-import * as path from 'path';
 
 const LOGIN_TIMEOUT_MS = 120000; // 2 minutes timeout for user to scan QR
 const POLL_INTERVAL_MS = 2000; // Check every 2 seconds for login completion
@@ -10,12 +8,9 @@ export class PlaywrightService {
   private outputChannel: vscode.OutputChannel;
   private browser: Browser | null = null;
   private authenticatedPage: Page | null = null;
-  private userDataDir: string;
 
-  constructor(outputChannel: vscode.OutputChannel, storagePath: string) {
+  constructor(outputChannel: vscode.OutputChannel) {
     this.outputChannel = outputChannel;
-    this.userDataDir = path.join(storagePath, 'playwright-profile');
-    fs.mkdirSync(this.userDataDir, { recursive: true });
   }
 
   private log(message: string, level: 'info' | 'error' | 'warn' = 'info'): void {
@@ -50,28 +45,6 @@ export class PlaywrightService {
     try {
       const page = await browser.newPage();
       this.log('New page opened, navigating to mp.weixin.qq.com');
-
-      // 添加网络监听，查看网页返回的数据
-      page.on('response', async (response) => {
-        // 过滤微信API请求
-        if (response.url().includes('cgi-bin') && response.url().includes('mp.weixin.qq.com')) {
-          this.log(`[DEBUG] API Response: ${response.url()} - ${response.status()}`, 'info');
-          try {
-            // 尝试获取响应内容
-            if (response.headers()['content-type']?.includes('application/json')) {
-              const jsonData = await response.json();
-              this.log(`[DEBUG] JSON Response: ${JSON.stringify(jsonData)}`, 'info');
-            } else {
-              const textData = await response.text();
-              if (textData.length < 500) { // 只记录较短的响应内容
-                this.log(`[DEBUG] Text Response: ${textData}`, 'info');
-              }
-            }
-          } catch (error) {
-            this.log(`[DEBUG] Failed to parse response: ${error}`, 'warn');
-          }
-        }
-      });
 
       await page.goto('https://mp.weixin.qq.com/', {
         waitUntil: 'networkidle',
@@ -140,6 +113,7 @@ export class PlaywrightService {
         }
 
         // Check if page contains user info elements
+
         const hasUserElements = await page.evaluate(() => {
           return document.querySelector('.user-avatar') ||
                  document.querySelector('.nickname') ||
@@ -178,45 +152,50 @@ export class PlaywrightService {
 
   /**
    * Create a new draft directly in WeChat MP via browser automation (Playwright version)
+   * Strictly following test.py logic
    */
   async createDraftInBrowser(
     title: string,
     author: string,
     content: string,
-    digest?: string
+    digest?: string,
+    isOriginal?: boolean,
+    enableAppreciation?: boolean,
+    defaultCollection?: string,
+    publish?: boolean
   ): Promise<string> {
     if (!this.browser || !this.authenticatedPage) {
       throw new Error('No authenticated browser session. Please login first.');
     }
 
     const page = this.authenticatedPage;
-    this.log(`[DEBUG] Step 1: Starting draft creation`);
+    this.log(`[DEBUG] Starting draft creation following test.py logic`);
     this.log(`[DEBUG] Title: "${title}", Author: "${author}", Content length: ${content.length}`);
 
     try {
       await page.bringToFront();
 
-      // Step 2: ensure current browser page is in authenticated state
+      // Step 1: ensure current browser page is in authenticated state
       const isLoggedIn = await this.waitForLogin(page);
       if (!isLoggedIn) {
         throw new Error('Current browser session is not logged in. Please complete QR login first.');
       }
 
-      // Step 3: Navigate through the new interface (using the same steps as the Python script)
+      // Step 2: Navigate through interface (strictly following test.py logic)
       // 内容管理 → 草稿箱 → 新的创作 → 写新文章
-      this.log('[DEBUG] Step 3: Navigating to content management');
-      await page.getByTitle('内容管理').click();
+      this.log('[DEBUG] Step 2: Clicking "内容管理"');
+      await page.getByText('内容管理').click();
       await page.waitForLoadState('networkidle', { timeout: 60000 });
 
-      this.log('[DEBUG] Step 4: Navigating to draft box');
+      this.log('[DEBUG] Step 3: Clicking "草稿箱"');
       await page.getByRole('link', { name: '草稿箱' }).click();
       await page.waitForLoadState('networkidle', { timeout: 60000 });
 
-      this.log('[DEBUG] Step 5: Clicking "New Creation"');
-      await page.getByText('新的创作').click();
+      this.log('[DEBUG] Step 4: Clicking add button');
+      await page.locator('.weui-desktop-card__icon-add').click();
       await page.waitForLoadState('networkidle', { timeout: 60000 });
 
-      this.log('[DEBUG] Step 6: Clicking "Write New Article"');
+      this.log('[DEBUG] Step 5: Clicking "写新文章" and waiting for popup');
       let page1: Page;
       const popupPromise = page.waitForEvent('popup', { timeout: 60000 });
       await page.getByRole('link', { name: '写新文章' }).click();
@@ -224,217 +203,217 @@ export class PlaywrightService {
         page1 = await popupPromise;
       } catch (error) {
         // 如果没有弹出新窗口，可能是在当前窗口跳转
-        this.log('[DEBUG] No popup detected, checking current page');
+        this.log('[DEBUG] No popup detected, using current page');
         page1 = page;
       }
 
       if (page1 && page1 !== page) {
-        this.log('[DEBUG] Step 6: New page opened for article editing');
+        this.log('[DEBUG] New page opened for article editing');
         await page1.waitForLoadState('networkidle', { timeout: 60000 });
         this.authenticatedPage = page1; // 更新为新页面
-
-        // 获取并分析新页面的 HTML 内容，以便确定元素定位策略
-        const pageHTML = await this.authenticatedPage.content();
-        this.log(`[DEBUG] New page HTML length: ${pageHTML.length}`);
-
-        // 分析页面结构，查找关键元素
-        if (pageHTML.includes('edui1_contentplaceholder')) {
-          this.log('[DEBUG] Page contains edui1_contentplaceholder');
-        }
-        if (pageHTML.includes('从这里开始写正文')) {
-          this.log('[DEBUG] Page contains "从这里开始写正文" placeholder');
-        }
-        if (pageHTML.includes('请在这里输入标题')) {
-          this.log('[DEBUG] Page contains "请在这里输入标题" input');
-        }
       }
 
-      // Step 7: Fill in the form based on page structure
-      this.log('[DEBUG] Step 7: Filling in article details based on page structure');
+      // Step 6: Fill title (following test.py logic)
+      this.log('[DEBUG] Step 6: Filling title');
+      const titleSelector = this.authenticatedPage.getByRole('textbox', { name: '请在这里输入标题' });
+      await titleSelector.waitFor({ timeout: 60000 });
+      await titleSelector.click();
+      await titleSelector.fill(title);
+      this.log(`[DEBUG] Title filled: "${title}"`);
 
-      // Fill title
-      this.log('[DEBUG] Step 7a: Filling title');
-      try {
-        const titleSelector = this.authenticatedPage.getByRole('textbox', { name: '请在这里输入标题' });
-        await titleSelector.waitFor({ timeout: 60000 });
-        await titleSelector.click();
-        await titleSelector.fill(title);
-        this.log(`[DEBUG] Title filled: "${title}"`);
-      } catch (error) {
-        this.log(`[DEBUG] Failed to fill title: ${error}`, 'error');
-        throw error;
-      }
+      // Step 7: Fill author (following test.py logic)
+      this.log('[DEBUG] Step 7: Filling author');
+      const authorSelector = this.authenticatedPage.getByRole('textbox', { name: '请输入作者' });
+      await authorSelector.waitFor({ timeout: 60000 });
+      await authorSelector.click();
+      await authorSelector.fill(author);
+      this.log(`[DEBUG] Author filled: "${author}"`);
 
-      // Fill author
-      this.log('[DEBUG] Step 7b: Filling author');
-      await this.fillAuthorField(author);
-
-      // Fill content
+      // Step 8: Fill content (following test.py logic)
       this.log('[DEBUG] Step 8: Filling content');
-      await this.fillContentField(content);
+      await this.authenticatedPage.locator('section').click();
+      const contentSelector = this.authenticatedPage.locator('div').filter({ hasText: /^从这里开始写正文$/ }).nth(5);
+      await contentSelector.waitFor({ timeout: 60000 });
+      await contentSelector.fill(content);
+      this.log(`[DEBUG] Content filled, length: ${content.length}`);
 
-      // Fill digest if provided
+      // Step 9: Click article settings (following test.py logic)
+      this.log('[DEBUG] Step 9: Clicking "文章设置"');
+      await this.authenticatedPage.locator('#bot_bar_left_container').getByText('文章设置').click();
+      await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 60000 });
+
+      // Step 10: Fill digest if provided (following test.py logic)
       if (digest) {
-        this.log('[DEBUG] Step 9: Filling digest');
-        await this.fillDigestField(digest);
+        this.log('[DEBUG] Step 10: Filling digest');
+        const digestSelector = this.authenticatedPage.getByRole('textbox', {
+          name: '选填，不填写则默认抓取正文开头部分文字，摘要会在转发卡片和公众号会话展示。'
+        });
+        await digestSelector.waitFor({ timeout: 60000 });
+        await digestSelector.click();
+        await digestSelector.fill(digest);
+        this.log(`[DEBUG] Digest filled: "${digest}"`);
       }
 
-      // Save as draft
-      this.log('[DEBUG] Step 10: Saving as draft');
-      try {
+      // Step 11: Set cover image (following test.py logic - click twice)
+      this.log('[DEBUG] Step 11: Setting cover image (clicking add_cover twice)');
+      const coverButton = this.authenticatedPage.locator('.icon20_common.add_cover');
+      await coverButton.waitFor({ timeout: 60000 });
+      await coverButton.click();
+      await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 30000 });
+      await coverButton.click();
+      await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 30000 });
+
+      // Step 12: Click AI cover (following test.py logic)
+      this.log('[DEBUG] Step 12: Clicking "AI 配图"');
+      await this.authenticatedPage.getByRole('link', { name: 'AI 配图' }).click();
+      await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 60000 });
+
+      // Step 13: Input description (following test.py logic)
+      this.log('[DEBUG] Step 13: Inputting description for AI image');
+      const descriptionInput = this.authenticatedPage.getByRole('textbox', { name: '请描述你想要创作的内容' });
+      await descriptionInput.waitFor({ timeout: 60000 });
+      await descriptionInput.click();
+      await descriptionInput.fill(title);
+      this.log(`[DEBUG] Description filled: "${title}"`);
+
+      // Step 14: Click start creation (following test.py logic)
+      this.log('[DEBUG] Step 14: Clicking "开始创作"');
+      await this.authenticatedPage.getByRole('button', { name: '开始创作' }).click();
+      await this.authenticatedPage.waitForTimeout(10000); // Wait for AI to generate images
+
+      // Step 15: Select image (following test.py logic)
+      this.log('[DEBUG] Step 15: Selecting AI generated image');
+      const imageSelector = this.authenticatedPage.locator('div:nth-child(8) > .ai-image-list > div:nth-child(4) > .ai-image-item-wrp');
+      await imageSelector.waitFor({ timeout: 60000 });
+      await imageSelector.click();
+      this.log('[DEBUG] Image selected');
+
+      // Step 16: Click use (following test.py logic)
+      this.log('[DEBUG] Step 16: Clicking "使用"');
+      await this.authenticatedPage.getByRole('button', { name: '使用' }).click();
+      await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 60000 });
+
+      // Step 17: Click confirm (following test.py logic)
+      this.log('[DEBUG] Step 17: Clicking "确认"');
+      await this.authenticatedPage.getByRole('button', { name: '确认' }).click();
+      await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 60000 });
+
+      // Step 18: Set original declaration if enabled (following test.py logic)
+      if (isOriginal) {
+        this.log('[DEBUG] Step 18: Setting original declaration');
+        await this.authenticatedPage.getByText('原创').nth(2).click();
+        await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 30000 });
+        await this.authenticatedPage.getByText('文字原创').click();
+        await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 30000 });
+        await this.authenticatedPage.locator('#js_original_edit_box').getByRole('textbox', { name: '请输入作者' }).click();
+        await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 30000 });
+        
+        // Handle original agreement popup
+        const popupPromise = this.authenticatedPage.waitForEvent('popup', { timeout: 10000 });
+        await this.authenticatedPage.locator('.original_agreement').click();
+        try {
+          const page2 = await popupPromise;
+          await page2.close();
+        } catch (error) {
+          this.log('[DEBUG] No popup detected for original agreement', 'warn');
+        }
+        
+        await this.authenticatedPage.locator('.weui-desktop-icon-checkbox').click();
+        await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 30000 });
+        await this.authenticatedPage.getByRole('button', { name: '确定' }).click();
+        await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 30000 });
+        this.log('[DEBUG] Original declaration set');
+      }
+
+      // Step 19: Set appreciation if enabled (following test.py logic)
+      if (enableAppreciation) {
+        this.log('[DEBUG] Step 19: Setting appreciation');
+        await this.authenticatedPage.locator('#js_reward_setting_area').getByText('不开启').click();
+        await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 30000 });
+        await this.authenticatedPage.getByRole('textbox', { name: '选择或搜索赞赏账户' }).click();
+        await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 30000 });
+        await this.authenticatedPage.getByText('赞赏类型').click();
+        await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 30000 });
+        await this.authenticatedPage.locator('#vue_app').getByText('赞赏账户', { exact: true }).click();
+        await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 30000 });
+        await this.authenticatedPage.getByText('赞赏自动回复').click();
+        await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 30000 });
+        await this.authenticatedPage.locator('.weui-desktop-icon-checkbox').click();
+        await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 30000 });
+        await this.authenticatedPage.locator('.weui-desktop-icon-checkbox').click();
+        await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 30000 });
+        await this.authenticatedPage.getByRole('button', { name: '确定' }).click();
+        await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 30000 });
+        this.log('[DEBUG] Appreciation enabled');
+      }
+
+      // Step 20: Set collection if provided (following test.py logic)
+      if (defaultCollection) {
+        this.log(`[DEBUG] Step 20: Setting collection: ${defaultCollection}`);
+        await this.authenticatedPage.locator('#js_article_tags_area').getByText('未添加').click();
+        await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 30000 });
+        await this.authenticatedPage.getByRole('textbox', { name: '请选择合集' }).click();
+        await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 30000 });
+        await this.authenticatedPage.getByText(defaultCollection).click();
+        await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 30000 });
+        await this.authenticatedPage.getByText('每篇文章最多添加1个合集').click();
+        await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 30000 });
+        await this.authenticatedPage.getByRole('button', { name: '确认' }).click();
+        await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 30000 });
+        this.log(`[DEBUG] Collection set: ${defaultCollection}`);
+      }
+
+      // Step 21: Save as draft or publish (following test.py logic)
+      if (publish) {
+        this.log('[DEBUG] Step 21: Publishing article');
+        await this.authenticatedPage.getByRole('button', { name: '发表' }).click();
+        await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 60000 });
+
+        this.log('[DEBUG] Step 22: Clicking "群发通知"');
+        await this.authenticatedPage.getByText('群发通知', { exact: true }).click();
+        await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 30000 });
+
+        this.log('[DEBUG] Step 23: Clicking "定时发表"');
+        await this.authenticatedPage.getByText('定时发表', { exact: true }).click();
+        await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 30000 });
+
+        this.log('[DEBUG] Step 24: Confirming publish');
+        await this.authenticatedPage.locator('#vue_app').getByRole('button', { name: '发表' }).click();
+        await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 60000 });
+
+        this.log('[DEBUG] Step 25: Clicking "未开启群发通知"');
+        await this.authenticatedPage.getByText('未开启群发通知', { exact: true }).click();
+        await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 30000 });
+
+        this.log('[DEBUG] Step 26: Clicking content recommendation notice');
+        await this.authenticatedPage.getByText('内容将展示在公众号主页，若允许平台推荐，内容有可能被推荐至看一看或其他推荐场景。').click();
+        await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 30000 });
+
+        this.log('[DEBUG] Step 27: Clicking "继续发表"');
+        await this.authenticatedPage.getByRole('button', { name: '继续发表' }).click();
+        await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 60000 });
+
+        this.log('[DEBUG] Article published successfully');
+        vscode.window.showInformationMessage('Article published successfully in Chrome');
+      } else {
+        this.log('[DEBUG] Step 21: Saving as draft');
         const saveButton = this.authenticatedPage.getByRole('button', { name: '保存为草稿' });
         await saveButton.waitFor({ timeout: 60000 });
-
-        // 点击保存按钮并等待导航完成
-        const navigationPromise = this.authenticatedPage.waitForLoadState('networkidle', { timeout: 60000 });
         await saveButton.click();
-        await navigationPromise;
-      } catch (error) {
-        this.log(`[DEBUG] Failed to save draft: ${error}`, 'error');
-        throw error;
+        await this.authenticatedPage.waitForLoadState('networkidle', { timeout: 60000 });
+
+        this.log('[DEBUG] Draft saved successfully');
+        vscode.window.showInformationMessage('Draft saved successfully in Chrome');
       }
 
       const draftUrl = this.authenticatedPage.url();
-      this.log(`[DEBUG] Draft created successfully: ${draftUrl}`);
-
-      vscode.window.showInformationMessage('Draft created successfully in Chrome');
+      this.log(`[DEBUG] Final URL: ${draftUrl}`);
 
       return draftUrl;
 
     } catch (error) {
       this.log(`[DEBUG] Error creating draft: ${error}`, 'error');
       throw error;
-    }
-  }
-
-  /**
-   * Fill author field with robust locator strategy
-   */
-  private async fillAuthorField(author: string): Promise<void> {
-    try {
-      this.log(`[DEBUG] Trying to fill author: "${author}"`);
-      const authorSelector = this.authenticatedPage!.getByRole('textbox', { name: '请输入作者' });
-
-      await authorSelector.waitFor({ timeout: 30000 });
-
-      // 使用与参考脚本相同的方法：先点击，再使用 Tab 键，最后填充
-      await authorSelector.click();
-      await authorSelector.press('Tab');
-
-      // 填充作者名称
-      await authorSelector.fill(author);
-      this.log(`[DEBUG] Author filled: "${author}"`);
-    } catch (error) {
-      this.log(`[DEBUG] Failed to fill author with reference selector: ${error}`, 'warn');
-
-      // 备用策略：尝试其他定位方法
-      try {
-        const authorInputSelectors = [
-          this.authenticatedPage!.locator('input[name="author"]'),
-          this.authenticatedPage!.locator('input[type="text"]').filter({ hasText: '请输入作者' }),
-          this.authenticatedPage!.getByPlaceholder('请输入作者')
-        ];
-
-        let authorFilled = false;
-        for (const selector of authorInputSelectors) {
-          try {
-            await selector.waitFor({ timeout: 10000 });
-            await selector.click();
-            await selector.fill(author);
-            this.log(`[DEBUG] Author filled with fallback selector: "${author}"`);
-            authorFilled = true;
-            break;
-          } catch (fallbackError) {
-            this.log(`[DEBUG] Fallback selector failed: ${fallbackError}`, 'warn');
-          }
-        }
-
-        if (!authorFilled) {
-          this.log('[DEBUG] Author field not found, skipping', 'warn');
-        }
-      } catch (fallbackError) {
-        this.log(`[DEBUG] Fallback strategies also failed: ${fallbackError}`, 'error');
-      }
-    }
-  }
-
-  /**
-   * Fill content field with robust locator strategy
-   */
-  private async fillContentField(content: string): Promise<void> {
-    try {
-      // 微信公众号现在使用 ProseMirror 富文本编辑器
-      const proseMirrorSelector = this.authenticatedPage!.locator('div.ProseMirror');
-
-      if (await proseMirrorSelector.count() > 0) {
-        await proseMirrorSelector.waitFor({ timeout: 30000 });
-        await proseMirrorSelector.click();
-        await proseMirrorSelector.fill(content);
-        return;
-      }
-
-      // 如果 ProseMirror 未找到，尝试其他方法
-      const ueditorSelector = this.authenticatedPage!.locator('#ueditor_0');
-      if (await ueditorSelector.count() > 0) {
-        await ueditorSelector.waitFor({ timeout: 30000 });
-        await ueditorSelector.click();
-
-        try {
-          const editableArea = ueditorSelector.locator('div[contenteditable="true"]');
-          if (await editableArea.count() > 0) {
-            await editableArea.fill(content);
-            return;
-          }
-        } catch (error) {
-          // 忽略 UEditor 内部错误，继续尝试其他方法
-        }
-      }
-
-      // 如果上述方法都失败，尝试更简单的方法
-      const contenteditableSelector = this.authenticatedPage!.locator('[contenteditable="true"]');
-      if (await contenteditableSelector.count() > 0) {
-        await contenteditableSelector.waitFor({ timeout: 30000 });
-        await contenteditableSelector.first().click();
-        await contenteditableSelector.first().fill(content);
-        return;
-      }
-
-      // 最后尝试原始的参考脚本选择器
-      await this.authenticatedPage!.locator('section').click();
-      const contentSelector = this.authenticatedPage!.locator('div').filter({ hasText: /^从这里开始写正文$/ }).first();
-      await contentSelector.waitFor({ timeout: 30000 });
-      await contentSelector.click();
-      await contentSelector.fill(content);
-
-    } catch (error) {
-      this.log(`[DEBUG] Failed to fill content: ${error}`, 'error');
-
-      // 只在出错时打印详细的调试信息
-      try {
-        const bodyHTML = await this.authenticatedPage!.locator('body').innerHTML();
-        const editorRelatedHTML = bodyHTML.match(/<div[^>]*ProseMirror[^>]*>[\s\S]{0,200}<\/div>/) ||
-                                   bodyHTML.match(/<div[^>]*ueditor[^>]*>[\s\S]{0,200}<\/div>/) ||
-                                   bodyHTML.match(/<div[^>]*contenteditable[^>]*>[\s\S]{0,200}<\/div>/);
-        if (editorRelatedHTML) {
-          this.log(`[DEBUG] Editor-related HTML snippet: ${editorRelatedHTML[0]}`, 'warn');
-        }
-      } catch (htmlError) {
-        this.log(`[DEBUG] Failed to extract editor HTML snippet: ${htmlError}`, 'warn');
-      }
-    }
-  }
-
-  /**
-   * Fill digest field with robust locator strategy
-   */
-  private async fillDigestField(digest: string): Promise<void> {
-    try {
-      const digestSelector = this.authenticatedPage!.getByRole('textbox', { name: '请输入摘要' });
-      await digestSelector.waitFor({ timeout: 30000 });
-      await digestSelector.click();
-      await digestSelector.fill(digest);
-    } catch (error) {
-      this.log(`[DEBUG] Digest field not found: ${error}`, 'warn');
     }
   }
 

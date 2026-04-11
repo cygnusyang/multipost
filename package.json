@@ -2,7 +2,7 @@
   "name": "multipost",
   "displayName": "MultiPost - WeChat Publisher",
   "description": "Publish Markdown directly to WeChat Official Accounts from VSCode",
-  "version": "0.5.7",
+  "version": "0.5.8",
   "publisher": "cygnus",
   "icon": "media/icon.png",
   "repository": {
@@ -28,23 +28,10 @@
           "type": "string",
           "default": "",
           "description": "Default author name used when creating a WeChat draft."
-        },
-        "wechatPublisher.autoOpenDraftAfterPublish": {
-          "type": "boolean",
-          "default": true,
-          "description": "Automatically open the created WeChat draft in the browser after upload."
         }
       }
     },
     "commands": [
-      {
-        "command": "multipost.preview",
-        "title": "Preview MultiPost Format",
-        "icon": {
-          "light": "media/icons/preview-light.svg",
-          "dark": "media/icons/preview-dark.svg"
-        }
-      },
       {
         "command": "multipost.uploadToWeChat",
         "title": "Upload to WeChat Official Accounts (Playwright)",
@@ -69,25 +56,9 @@
     "test:playwright": "playwright test",
     "playwright:codegen": "playwright codegen"
   },
-  "dependencies": {
-    "canvas": "^3.2.3",
-    "form-data": "^4.0.0",
-    "jsdom": "^29.0.1",
-    "mermaid": "^10.9.0",
-    "node-fetch": "^2.7.0",
-    "rehype-highlight": "^7.0.0",
-    "rehype-stringify": "^10.0.0",
-    "remark-gfm": "^4.0.0",
-    "remark-parse": "^11.0.0",
-    "remark-rehype": "^11.1.0",
-    "unified": "^11.0.4"
-  },
   "devDependencies": {
-    "@types/form-data": "^2.2.1",
     "@types/jest": "^30.0.0",
-    "@types/jsdom": "^28.0.1",
     "@types/node": "^20.10.0",
-    "@types/node-fetch": "^2.6.13",
     "@types/vscode": "^1.80.0",
     "jest": "^30.3.0",
     "playwright": "^1.59.1",
