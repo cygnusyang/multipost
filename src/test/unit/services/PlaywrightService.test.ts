@@ -4,10 +4,12 @@ import * as path from 'path';
 import { PlaywrightService } from 'src/services/PlaywrightService';
 
 const mockLaunchPersistentContext = jest.fn();
+const mockLaunch = jest.fn();
 
 jest.mock('playwright', () => ({
   chromium: {
     launchPersistentContext: (...args: unknown[]) => mockLaunchPersistentContext(...args),
+    launch: (...args: unknown[]) => mockLaunch(...args),
   },
 }));
 
@@ -139,11 +141,13 @@ describe('PlaywrightService', () => {
       name: 'test',
     } as any);
 
+    mockLaunch.mockRejectedValueOnce(new Error('standalone launch unavailable'));
     const renderPage = {
       goto: jest.fn().mockResolvedValue(undefined),
       evaluate: jest.fn().mockResolvedValue('data:image/png;base64,AAAA'),
       close: jest.fn().mockResolvedValue(undefined),
       isClosed: jest.fn().mockReturnValue(false),
+      url: jest.fn().mockReturnValue('about:blank'),
     };
 
     (service as any).context = {

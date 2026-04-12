@@ -1,4 +1,4 @@
-import { chromium, BrowserContext, Locator, Page } from 'playwright';
+import { chromium, Browser, BrowserContext, Locator, Page } from 'playwright';
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as os from 'os';
@@ -7,18 +7,21 @@ import MarkdownIt from 'markdown-it';
 import type { ContentStyleSettings } from './SettingsService';
 
 const LOGIN_TIMEOUT_MS = 120000; // 2 minutes timeout for user to scan QR
-const POLL_INTERVAL_MS = 2000; // Check every 2 seconds for login completion
-const BUTTON_ACTIVATION_DELAY_MS = 500; // Delay for button activation after hover
-const INTERACTION_TIMEOUT_MS = 5000; // Timeout for best-effort page settle
+const POLL_INTERVAL_MS = 1000; // Check every 1 second for login completion
+const BUTTON_ACTIVATION_DELAY_MS = 120; // Delay for button activation after hover
+const INTERACTION_TIMEOUT_MS = 2000; // Timeout for best-effort page settle
 const DIALOG_TIMEOUT_MS = 30000;
 const DIALOG_CLOSE_TIMEOUT_MS = 10000; // Shorter timeout for dialog close operations
-const UI_SETTLE_MS = 500;
+const UI_SETTLE_MS = 120;
 const PROCESS_SINGLETON_RECOVERY_DELAY_MS = 400;
 const DIALOG_SELECTOR = '.weui-desktop-dialog:visible, .dialog_wrp:visible, .popover_dialog:visible';
-const REWARD_DIALOG_POLL_INTERVAL_MS = 200;
+const REWARD_DIALOG_POLL_INTERVAL_MS = 120;
 const MERMAID_LOCAL_RUNTIME_RELATIVE_PATH = path.join('mermaid', 'dist', 'mermaid.min.js');
 const MERMAID_UPLOAD_WAIT_MS = 30000;
-const MERMAID_UPLOAD_INPUT_SETTLE_MS = 250;
+const MERMAID_UPLOAD_INPUT_SETTLE_MS = 80;
+const MERMAID_IMAGE_LOAD_TIMEOUT_MS = 10000;
+const MERMAID_STANDALONE_BROWSER_ARGS = ['--disable-dev-shm-usage', '--disable-gpu'];
+const MERMAID_RENDER_EVAL_TIMEOUT_MS = 45000;
 
 interface MermaidUploadTask {
   token: string;
@@ -333,109 +336,325 @@ export class PlaywrightService {
       return null;
     }
 
+    const traceId = this.createMermaidRenderTraceId(diagramCode);
+    this.log(`[DEBUG] Mermaid render start (${traceId}): ${this.summarizeMermaidCodeForLog(diagramCode)}`);
+
+    let renderBrowser: Browser | null = null;
+    let renderContext: BrowserContext | null = null;
     let renderPage: Page | null = null;
+    let detachDebugHooks: (() => void) | null = null;
     try {
-      renderPage = await context.newPage();
+      try {
+        renderBrowser = await chromium.launch({
+          headless: true,
+          args: MERMAID_STANDALONE_BROWSER_ARGS,
+        });
+        renderContext = await renderBrowser.newContext();
+        renderPage = await renderContext.newPage();
+        this.log(`[DEBUG] Mermaid rendering uses standalone Chromium instance (${traceId})`);
+      } catch (standaloneLaunchError) {
+        this.log(
+          `[DEBUG] Failed to launch standalone Mermaid browser (${traceId}), fallback to shared browser context: ${standaloneLaunchError}`,
+          'warn'
+        );
+        const browser = typeof context.browser === 'function' ? context.browser() : null;
+        if (browser) {
+          renderContext = await browser.newContext();
+          renderPage = await renderContext.newPage();
+          this.log(`[DEBUG] Mermaid rendering uses dedicated ephemeral browser context (${traceId})`);
+        } else {
+          renderPage = await context.newPage();
+          this.log(`[DEBUG] Mermaid rendering uses shared login context page (${traceId})`, 'warn');
+        }
+      }
+
+      detachDebugHooks = this.attachMermaidRenderPageDebugHooks(renderPage, traceId);
       await renderPage.goto('about:blank', { waitUntil: 'domcontentloaded' });
+      this.log(`[DEBUG] Mermaid render page ready (${traceId}), url=${renderPage.url()}`);
 
       const runtimeReady = await this.ensureMermaidRuntime(renderPage);
       if (!runtimeReady) {
-        this.log('Mermaid runtime is unavailable in isolated render page', 'warn');
+        this.log(`Mermaid runtime is unavailable in isolated render page (${traceId})`, 'warn');
         return null;
       }
 
-      const pngDataUrl = await renderPage.evaluate(async (code) => {
-        const mermaidApi = (window as any).mermaid;
-        if (!mermaidApi) {
-          return null;
-        }
+      const evaluatePromise = renderPage.evaluate(
+        async ({ code, imageLoadTimeoutMs, currentTraceId }) => {
+          const trace = (message: string) => {
+            // eslint-disable-next-line no-console
+            console.debug(`[MP_MERMAID_TRACE:${currentTraceId}] ${message}`);
+          };
 
-        const parseDimension = (value: string | null): number | null => {
-          if (!value) {
-            return null;
-          }
-          const match = value.trim().match(/^([0-9]+(?:\.[0-9]+)?)/);
-          if (!match) {
-            return null;
-          }
-          const parsed = Number.parseFloat(match[1]);
-          return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-        };
+          const diagnostics: {
+            parseAttempted: boolean;
+            parseOk: boolean;
+            parseError: string | null;
+            renderMs: number | null;
+            imageLoadMs: number | null;
+            svgLength: number;
+            totalMs: number;
+          } = {
+            parseAttempted: false,
+            parseOk: false,
+            parseError: null,
+            renderMs: null,
+            imageLoadMs: null,
+            svgLength: 0,
+            totalMs: 0,
+          };
 
-        mermaidApi.initialize({ startOnLoad: false, securityLevel: 'loose' });
-        const renderId = `mp-mermaid-${Date.now()}`;
-        const container = document.createElement('div');
-        container.style.position = 'fixed';
-        container.style.left = '-99999px';
-        container.style.top = '0';
-        container.style.opacity = '0';
-        document.body.appendChild(container);
+          const startedAt = Date.now();
+          trace('evaluate-start');
 
-        try {
-          const result = await mermaidApi.render(renderId, code, container);
-
-          const parser = new DOMParser();
-          const svgDoc = parser.parseFromString(result.svg as string, 'image/svg+xml');
-          const svgEl = svgDoc.querySelector('svg');
-          if (!svgEl) {
-            return null;
+          const mermaidApi = (window as any).mermaid;
+          if (!mermaidApi) {
+            diagnostics.totalMs = Date.now() - startedAt;
+            return { dataUrl: null, error: 'window.mermaid is undefined', diagnostics };
           }
 
-          let width = parseDimension(svgEl.getAttribute('width'));
-          let height = parseDimension(svgEl.getAttribute('height'));
-          const viewBox = svgEl.getAttribute('viewBox');
-          if ((!width || !height) && viewBox) {
-            const parts = viewBox
-              .trim()
-              .split(/\s+/)
-              .map((item) => Number.parseFloat(item));
-            if (parts.length === 4 && Number.isFinite(parts[2]) && Number.isFinite(parts[3])) {
-              width = width ?? parts[2];
-              height = height ?? parts[3];
+          const parseDimension = (value: string | null): number | null => {
+            if (!value) {
+              return null;
+            }
+            const normalized = value.trim().toLowerCase();
+            if (!normalized || normalized.endsWith('%')) {
+              return null;
+            }
+            const match = normalized.match(/^([0-9]+(?:\.[0-9]+)?)(px)?$/);
+            if (!match) {
+              return null;
+            }
+            const parsed = Number.parseFloat(match[1]);
+            return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+          };
+
+          const getIntrinsicSize = (svgEl: SVGSVGElement): { width: number; height: number } => {
+            const viewBox = svgEl.getAttribute('viewBox');
+            if (viewBox) {
+              const parts = viewBox
+                .trim()
+                .split(/\s+/)
+                .map((item) => Number.parseFloat(item));
+              if (parts.length === 4 && Number.isFinite(parts[2]) && Number.isFinite(parts[3])) {
+                if (parts[2] > 0 && parts[3] > 0) {
+                  return { width: parts[2], height: parts[3] };
+                }
+              }
+            }
+
+            const widthAttr = parseDimension(svgEl.getAttribute('width'));
+            const heightAttr = parseDimension(svgEl.getAttribute('height'));
+            if (widthAttr && heightAttr) {
+              return { width: widthAttr, height: heightAttr };
+            }
+
+            const rect = svgEl.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) {
+              return { width: rect.width, height: rect.height };
+            }
+
+            return { width: 1200, height: 675 };
+          };
+
+          mermaidApi.initialize({ startOnLoad: false, securityLevel: 'loose' });
+
+          if (typeof mermaidApi.parse === 'function') {
+            diagnostics.parseAttempted = true;
+            trace('parse-start');
+            try {
+              await mermaidApi.parse(code);
+              diagnostics.parseOk = true;
+              trace('parse-ok');
+            } catch (parseError: any) {
+              diagnostics.parseError = parseError?.message ? String(parseError.message) : String(parseError);
+              diagnostics.totalMs = Date.now() - startedAt;
+              trace(`parse-failed ${diagnostics.parseError}`);
+              return { dataUrl: null, error: `mermaid.parse failed: ${diagnostics.parseError}`, diagnostics };
             }
           }
 
-          if (!width || !height) {
-            width = 1200;
-            height = 675;
-          }
-
-          const maxDimension = 2000;
-          const scale = Math.min(1, maxDimension / Math.max(width, height));
-          const finalWidth = Math.max(1, Math.round(width * scale));
-          const finalHeight = Math.max(1, Math.round(height * scale));
-
-          const svgBlob = new Blob([result.svg as string], { type: 'image/svg+xml;charset=utf-8' });
-          const svgUrl = URL.createObjectURL(svgBlob);
+          const renderId = `mp-mermaid-${Date.now()}`;
+          const container = document.createElement('div');
+          container.style.position = 'fixed';
+          container.style.left = '-99999px';
+          container.style.top = '0';
+          container.style.opacity = '0';
+          document.body.appendChild(container);
 
           try {
-            const pngUrl = await new Promise<string | null>((resolve) => {
-              const image = new Image();
-              image.onload = () => {
-                const canvas = document.createElement('canvas');
-                canvas.width = finalWidth;
-                canvas.height = finalHeight;
-                const ctx = canvas.getContext('2d');
-                if (!ctx) {
-                  resolve(null);
-                  return;
-                }
-                ctx.fillStyle = '#ffffff';
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-                ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-                resolve(canvas.toDataURL('image/png'));
-              };
-              image.onerror = () => resolve(null);
-              image.src = svgUrl;
-            });
-            return pngUrl;
+            const renderStartAt = Date.now();
+            trace('render-start');
+            const result = await mermaidApi.render(renderId, code, container);
+            diagnostics.renderMs = Date.now() - renderStartAt;
+            diagnostics.svgLength = typeof result.svg === 'string' ? result.svg.length : 0;
+            trace(`render-ok renderMs=${diagnostics.renderMs} svgLength=${diagnostics.svgLength}`);
+
+            const parser = new DOMParser();
+            const svgDoc = parser.parseFromString(result.svg as string, 'image/svg+xml');
+            const svgEl = svgDoc.querySelector('svg');
+            if (!svgEl) {
+              diagnostics.totalMs = Date.now() - startedAt;
+              return { dataUrl: null, error: 'Rendered SVG is missing <svg> root', diagnostics };
+            }
+
+            const intrinsicSize = getIntrinsicSize(svgEl);
+            const width = intrinsicSize.width;
+            const height = intrinsicSize.height;
+            trace(`intrinsic-size width=${Math.round(width)} height=${Math.round(height)}`);
+
+            const maxDimension = 2000;
+            const scale = Math.min(1, maxDimension / Math.max(width, height));
+            const finalWidth = Math.max(1, Math.round(width * scale));
+            const finalHeight = Math.max(1, Math.round(height * scale));
+
+            const svgBlob = new Blob([result.svg as string], { type: 'image/svg+xml;charset=utf-8' });
+            const svgUrl = URL.createObjectURL(svgBlob);
+
+            try {
+              const imageLoadStartedAt = Date.now();
+              trace('image-load-start');
+              const imageResult = await new Promise<{ pngUrl: string | null; reason: string | null }>((resolve) => {
+                const timeoutId = window.setTimeout(() => {
+                  trace('image-load-timeout');
+                  resolve({ pngUrl: null, reason: 'image-load-timeout' });
+                }, imageLoadTimeoutMs);
+                const image = new Image();
+                image.onload = () => {
+                  window.clearTimeout(timeoutId);
+                  const canvas = document.createElement('canvas');
+                  canvas.width = finalWidth;
+                  canvas.height = finalHeight;
+                  const ctx = canvas.getContext('2d');
+                  if (!ctx) {
+                    resolve({ pngUrl: null, reason: 'canvas-2d-context-unavailable' });
+                    return;
+                  }
+                  ctx.fillStyle = '#ffffff';
+                  ctx.fillRect(0, 0, canvas.width, canvas.height);
+                  ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+                  try {
+                    resolve({ pngUrl: canvas.toDataURL('image/png'), reason: null });
+                  } catch (toDataUrlError: any) {
+                    const message = toDataUrlError?.message
+                      ? String(toDataUrlError.message)
+                      : String(toDataUrlError);
+                    trace(`toDataURL-failed ${message}`);
+                    resolve({ pngUrl: null, reason: `toDataURL-failed: ${message}` });
+                  }
+                };
+                image.onerror = () => {
+                  window.clearTimeout(timeoutId);
+                  trace('image-load-error');
+                  resolve({ pngUrl: null, reason: 'image-load-error' });
+                };
+                image.src = svgUrl;
+              });
+              diagnostics.imageLoadMs = Date.now() - imageLoadStartedAt;
+              if (!imageResult.pngUrl) {
+                diagnostics.totalMs = Date.now() - startedAt;
+                return {
+                  dataUrl: null,
+                  error: `SVG image decode/canvas draw failed: ${imageResult.reason ?? 'unknown'}`,
+                  diagnostics,
+                };
+              }
+              diagnostics.totalMs = Date.now() - startedAt;
+              trace(`image-load-ok imageLoadMs=${diagnostics.imageLoadMs}`);
+              return { dataUrl: imageResult.pngUrl, error: null, diagnostics };
+            } finally {
+              URL.revokeObjectURL(svgUrl);
+            }
+          } catch (renderError: any) {
+            const message = renderError?.message ? String(renderError.message) : String(renderError);
+            diagnostics.totalMs = Date.now() - startedAt;
+            trace(`render-failed ${message}`);
+            return { dataUrl: null, error: `mermaid.render failed: ${message}`, diagnostics };
           } finally {
-            URL.revokeObjectURL(svgUrl);
+            container.remove();
+            trace(`evaluate-end totalMs=${Date.now() - startedAt}`);
           }
-        } finally {
-          container.remove();
+        },
+        {
+          code: diagramCode,
+          imageLoadTimeoutMs: MERMAID_IMAGE_LOAD_TIMEOUT_MS,
+          currentTraceId: traceId,
         }
-      }, diagramCode);
+      );
+
+      const timeoutMarker = Symbol('MERMAID_EVAL_TIMEOUT');
+      let evalTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
+      const evalResultOrTimeout = await Promise.race([
+        evaluatePromise,
+        new Promise<symbol>((resolve) => {
+          evalTimeoutHandle = setTimeout(() => resolve(timeoutMarker), MERMAID_RENDER_EVAL_TIMEOUT_MS);
+        }),
+      ]);
+      if (evalTimeoutHandle) {
+        clearTimeout(evalTimeoutHandle);
+      }
+
+      if (evalResultOrTimeout === timeoutMarker) {
+        this.log(
+          `[WARN] Mermaid evaluate timed out after ${MERMAID_RENDER_EVAL_TIMEOUT_MS}ms (${traceId}), pageUrl=${renderPage.url()}, closed=${renderPage.isClosed()}`,
+          'warn'
+        );
+        return null;
+      }
+
+      const evalResult = evalResultOrTimeout as
+        | string
+        | null
+        | {
+            dataUrl?: string | null;
+            error?: string | null;
+            diagnostics?: {
+              parseAttempted?: boolean;
+              parseOk?: boolean;
+              parseError?: string | null;
+              renderMs?: number | null;
+              imageLoadMs?: number | null;
+              svgLength?: number;
+              totalMs?: number;
+            };
+          };
+
+      const pngDataUrl =
+        evalResult && typeof evalResult === 'object' && 'dataUrl' in evalResult
+          ? ((evalResult as { dataUrl?: string | null }).dataUrl ?? null)
+          : (evalResult as string | null);
+      const renderError =
+        evalResult && typeof evalResult === 'object' && 'error' in evalResult
+          ? ((evalResult as { error?: string | null }).error ?? null)
+          : null;
+      const renderDiagnostics =
+        evalResult && typeof evalResult === 'object' && 'diagnostics' in evalResult
+          ? ((evalResult as { diagnostics?: Record<string, unknown> }).diagnostics ?? null)
+          : null;
+
+      if (renderError) {
+        this.log(`Mermaid render returned error detail (${traceId}): ${renderError}`, 'warn');
+      }
+
+      if (renderDiagnostics) {
+        this.log(
+          `[DEBUG] Mermaid render diagnostics (${traceId}): ${JSON.stringify(renderDiagnostics)}`,
+          'info'
+        );
+      }
+
+      if (
+        !pngDataUrl &&
+        renderError &&
+        /tainted canvases may not be exported|toDataURL-failed/i.test(renderError) &&
+        renderPage &&
+        !renderPage.isClosed()
+      ) {
+        this.log(`[WARN] Mermaid canvas export is tainted, trying screenshot fallback (${traceId})`, 'warn');
+        const fallbackDataUrl = await this.renderMermaidPngViaElementScreenshot(renderPage, diagramCode, traceId);
+        if (fallbackDataUrl) {
+          return fallbackDataUrl;
+        }
+      }
 
       if (!pngDataUrl) {
         return null;
@@ -445,18 +664,36 @@ export class PlaywrightService {
       const maxBytes = 2 * 1024 * 1024;
       if (approxBytes > maxBytes) {
         this.log(
-          `Mermaid diagram is too large after PNG render (${approxBytes} bytes), fallback to code block`,
+          `Mermaid diagram is too large after PNG render (${approxBytes} bytes), fallback to code block (${traceId})`,
           'warn'
         );
         return null;
       }
 
+      this.log(`[DEBUG] Mermaid render success (${traceId}), pngBytes≈${approxBytes}`);
       return pngDataUrl;
     } catch (error) {
-      this.log(`Failed to render Mermaid diagram, fallback to text block: ${error}`, 'warn');
+      if (error instanceof Error && error.message.includes('Execution context was destroyed')) {
+        const pageState = renderPage
+          ? `url=${renderPage.url()}, closed=${renderPage.isClosed()}`
+          : 'renderPage not created';
+        this.log(`Mermaid render context was destroyed (${traceId}, ${pageState})`, 'warn');
+      }
+      this.log(`Failed to render Mermaid diagram, fallback to text block (${traceId}): ${error}`, 'warn');
       return null;
     } finally {
-      if (renderPage && !renderPage.isClosed()) {
+      if (detachDebugHooks && renderPage && !renderPage.isClosed()) {
+        detachDebugHooks();
+      }
+      if (renderBrowser) {
+        await renderBrowser.close().catch((closeError) => {
+          this.log(`Failed to close Mermaid standalone browser: ${closeError}`, 'warn');
+        });
+      } else if (renderContext && !renderContext.isClosed()) {
+        await renderContext.close().catch((closeError) => {
+          this.log(`Failed to close Mermaid render context: ${closeError}`, 'warn');
+        });
+      } else if (renderPage && !renderPage.isClosed()) {
         await renderPage.close().catch((closeError) => {
           this.log(`Failed to close Mermaid render page: ${closeError}`, 'warn');
         });
@@ -626,6 +863,179 @@ export class PlaywrightService {
     }
   }
 
+  private summarizeMermaidCodeForLog(diagramCode: string): string {
+    const normalized = diagramCode.replace(/\s+/g, ' ').trim();
+    const head = normalized.slice(0, 80);
+    const tail = normalized.length > 140 ? normalized.slice(-60) : '';
+    const hasInitDirective = /^\s*%%\{init:/.test(diagramCode);
+    return `len=${diagramCode.length}, hasInit=${hasInitDirective}, head="${head}"${tail ? `, tail="${tail}"` : ''}`;
+  }
+
+  private createMermaidRenderTraceId(diagramCode: string): string {
+    const suffix = Math.random().toString(36).slice(2, 8);
+    return `mermaid-${Date.now()}-${diagramCode.length}-${suffix}`;
+  }
+
+  private attachMermaidRenderPageDebugHooks(page: Page, traceId: string): () => void {
+    if (typeof (page as any).on !== 'function' || typeof (page as any).off !== 'function') {
+      return () => {};
+    }
+
+    const consoleListener = (msg: any) => {
+      const text = typeof msg.text === 'function' ? msg.text() : String(msg);
+      if (text.includes(`[MP_MERMAID_TRACE:${traceId}]`)) {
+        this.log(`[DEBUG] ${text}`);
+      }
+    };
+    const pageErrorListener = (error: Error) => {
+      this.log(`[WARN] Mermaid pageerror (${traceId}): ${error.message}`, 'warn');
+    };
+    const crashListener = () => {
+      this.log(`[WARN] Mermaid page crashed (${traceId})`, 'warn');
+    };
+    const closeListener = () => {
+      this.log(`[DEBUG] Mermaid render page closed (${traceId})`);
+    };
+    const frameNavigatedListener = (frame: any) => {
+      try {
+        if (frame === page.mainFrame()) {
+          this.log(`[DEBUG] Mermaid main frame navigated (${traceId}): ${frame.url()}`);
+        }
+      } catch {
+        // ignore telemetry errors
+      }
+    };
+
+    page.on('console', consoleListener);
+    page.on('pageerror', pageErrorListener);
+    page.on('crash', crashListener);
+    page.on('close', closeListener);
+    page.on('framenavigated', frameNavigatedListener);
+
+    return () => {
+      page.off('console', consoleListener);
+      page.off('pageerror', pageErrorListener);
+      page.off('crash', crashListener);
+      page.off('close', closeListener);
+      page.off('framenavigated', frameNavigatedListener);
+    };
+  }
+
+  private async renderMermaidPngViaElementScreenshot(
+    renderPage: Page,
+    diagramCode: string,
+    traceId: string
+  ): Promise<string | null> {
+    try {
+      const meta = await renderPage.evaluate(async ({ code, currentTraceId }) => {
+        const trace = (message: string) => {
+          // eslint-disable-next-line no-console
+          console.debug(`[MP_MERMAID_TRACE:${currentTraceId}] screenshot-fallback ${message}`);
+        };
+
+        const mermaidApi = (window as any).mermaid;
+        if (!mermaidApi) {
+          return { containerId: null, error: 'window.mermaid is undefined in screenshot fallback' };
+        }
+
+        const parseDimension = (value: string | null): number | null => {
+          if (!value) {
+            return null;
+          }
+          const normalized = value.trim().toLowerCase();
+          if (!normalized || normalized.endsWith('%')) {
+            return null;
+          }
+          const match = normalized.match(/^([0-9]+(?:\.[0-9]+)?)(px)?$/);
+          if (!match) {
+            return null;
+          }
+          const parsed = Number.parseFloat(match[1]);
+          return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+        };
+
+        const getIntrinsicSize = (svgEl: SVGSVGElement): { width: number; height: number } => {
+          const viewBox = svgEl.getAttribute('viewBox');
+          if (viewBox) {
+            const parts = viewBox
+              .trim()
+              .split(/\s+/)
+              .map((item) => Number.parseFloat(item));
+            if (parts.length === 4 && Number.isFinite(parts[2]) && Number.isFinite(parts[3])) {
+              if (parts[2] > 0 && parts[3] > 0) {
+                return { width: parts[2], height: parts[3] };
+              }
+            }
+          }
+
+          const widthAttr = parseDimension(svgEl.getAttribute('width'));
+          const heightAttr = parseDimension(svgEl.getAttribute('height'));
+          if (widthAttr && heightAttr) {
+            return { width: widthAttr, height: heightAttr };
+          }
+
+          const rect = svgEl.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) {
+            return { width: rect.width, height: rect.height };
+          }
+
+          return { width: 1200, height: 675 };
+        };
+
+        mermaidApi.initialize({ startOnLoad: false, securityLevel: 'loose' });
+
+        const containerId = `mp-mermaid-shot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const host = document.createElement('div');
+        host.id = containerId;
+        host.style.position = 'absolute';
+        host.style.left = '0';
+        host.style.top = '0';
+        host.style.padding = '8px';
+        host.style.background = '#ffffff';
+        host.style.display = 'inline-block';
+        document.body.appendChild(host);
+
+        trace('render-start');
+        const renderId = `mp-mermaid-shot-${Date.now()}`;
+        const result = await mermaidApi.render(renderId, code, host);
+        host.innerHTML = result.svg as string;
+        const svgEl = host.querySelector('svg');
+        if (!svgEl) {
+          host.remove();
+          return { containerId: null, error: 'Screenshot fallback rendered SVG is missing <svg> root' };
+        }
+
+        const intrinsicSize = getIntrinsicSize(svgEl);
+        const width = intrinsicSize.width;
+        const height = intrinsicSize.height;
+
+        svgEl.setAttribute('width', `${Math.ceil(width)}`);
+        svgEl.setAttribute('height', `${Math.ceil(height)}`);
+        trace(`render-ok width=${Math.ceil(width)} height=${Math.ceil(height)}`);
+        return { containerId, error: null };
+      }, { code: diagramCode, currentTraceId: traceId });
+
+      const containerId = meta?.containerId ?? null;
+      const fallbackError = meta?.error ?? null;
+      if (!containerId) {
+        this.log(`Mermaid screenshot fallback setup failed (${traceId}): ${fallbackError ?? 'unknown error'}`, 'warn');
+        return null;
+      }
+
+      const target = renderPage.locator(`#${containerId}`);
+      await target.waitFor({ state: 'visible', timeout: 5000 });
+      const pngBuffer = await target.screenshot({ type: 'png' });
+      await renderPage.evaluate((id) => {
+        document.getElementById(id)?.remove();
+      }, containerId);
+      this.log(`[DEBUG] Mermaid screenshot fallback succeeded (${traceId}), bytes=${pngBuffer.length}`);
+      return `data:image/png;base64,${pngBuffer.toString('base64')}`;
+    } catch (error) {
+      this.log(`Mermaid screenshot fallback failed (${traceId}): ${error}`, 'warn');
+      return null;
+    }
+  }
+
   private isLatexFormula(text: string): boolean {
     if (/[\\^_{}]/.test(text)) return true;
     if (/[α-ωΑ-Ω]/.test(text)) return true;
@@ -704,6 +1114,7 @@ export class PlaywrightService {
     for (let i = 0; i < mermaidBlocks.length; i += 1) {
       const token = `MP_MERMAID_PLACEHOLDER_${i}`;
       const diagramCode = mermaidBlocks[i];
+      this.log(`[DEBUG] Mermaid diagram ${i + 1} source summary: ${this.summarizeMermaidCodeForLog(diagramCode)}`);
       const dataUrl = await this.renderMermaidToPngDataUrl(diagramCode);
       const fallbackText = `<pre><code class="language-mermaid">${this.markdownParser.utils.escapeHtml(diagramCode)}</code></pre>`;
       const mermaidHtml = dataUrl
@@ -761,6 +1172,7 @@ export class PlaywrightService {
     for (let i = 0; i < mermaidBlocks.length; i += 1) {
       const token = `MP_MERMAID_PLACEHOLDER_${i}`;
       const diagramCode = mermaidBlocks[i];
+      this.log(`[DEBUG] Mermaid diagram ${i + 1} source summary: ${this.summarizeMermaidCodeForLog(diagramCode)}`);
       const dataUrl = await this.renderMermaidToPngDataUrl(diagramCode);
       const fallbackText = `<pre><code class="language-mermaid">${this.markdownParser.utils.escapeHtml(diagramCode)}</code></pre>`;
 
@@ -1142,6 +1554,70 @@ export class PlaywrightService {
     await target.waitFor({ state: 'visible', timeout: timeoutMs });
     await target.click();
     await this.maybeWaitForNavigation(page);
+  }
+
+  private async clickAiCoverEntry(timeoutMs: number = DIALOG_TIMEOUT_MS): Promise<void> {
+    if (!this.authenticatedPage) {
+      throw new Error('No authenticated page available.');
+    }
+
+    const page = this.authenticatedPage;
+    const aiEntryCandidates: Array<{ name: string; locator: Locator }> = [
+      { name: 'a.js_aiImage', locator: page.locator('a.js_aiImage').first() },
+      { name: 'link[AI 配图]', locator: page.getByRole('link', { name: 'AI 配图' }).first() },
+      { name: '.pop-opr__button(hasText=AI 配图)', locator: page.locator('.pop-opr__button').filter({ hasText: 'AI 配图' }).first() },
+    ];
+
+    for (const candidate of aiEntryCandidates) {
+      const count = await candidate.locator.count().catch(() => 0);
+      if (count === 0) {
+        continue;
+      }
+
+      await candidate.locator.waitFor({ state: 'attached', timeout: Math.min(timeoutMs, 8000) });
+      const isVisible = await candidate.locator.isVisible().catch(() => false);
+      this.log(`[DEBUG] Trying AI cover entry via ${candidate.name}, visible=${isVisible}`);
+
+      if (!isVisible) {
+        continue;
+      }
+
+      try {
+        await candidate.locator.click({ timeout: 3000 });
+        await this.maybeWaitForNavigation(page);
+        this.log(`[DEBUG] AI cover entry clicked via ${candidate.name}`);
+        return;
+      } catch (clickError) {
+        this.log(`[DEBUG] Normal click failed for ${candidate.name}: ${clickError}`, 'warn');
+      }
+
+      try {
+        await candidate.locator.click({ force: true, timeout: 3000 });
+        await this.maybeWaitForNavigation(page);
+        this.log(`[DEBUG] AI cover entry force-clicked via ${candidate.name}`);
+        return;
+      } catch (forceClickError) {
+        this.log(`[DEBUG] Force click failed for ${candidate.name}: ${forceClickError}`, 'warn');
+      }
+    }
+
+    const domClicked = await page.evaluate(() => {
+      const candidates = Array.from(document.querySelectorAll('a.js_aiImage, a.pop-opr__button')) as HTMLElement[];
+      const target = candidates.find((el) => (el.innerText || '').trim().includes('AI 配图'));
+      if (!target) {
+        return false;
+      }
+      target.click();
+      return true;
+    });
+
+    if (domClicked) {
+      await this.maybeWaitForNavigation(page);
+      this.log('[DEBUG] AI cover entry clicked via DOM fallback');
+      return;
+    }
+
+    throw new Error('Unable to click "AI 配图" entry after actionability and fallback attempts.');
   }
 
   /**
@@ -1575,7 +2051,8 @@ export class PlaywrightService {
 
       // Step 12: Click AI cover (following test.py logic)
       this.log('[DEBUG] Step 12: Clicking "AI 配图"');
-      await this.clickAndStabilize(this.authenticatedPage.getByRole('link', { name: 'AI 配图' }), this.authenticatedPage);
+      await this.authenticatedPage.locator('a.js_aiImage').first().waitFor({ state: 'attached', timeout: DIALOG_TIMEOUT_MS });
+      await this.clickAiCoverEntry();
 
       // Step 13: Input description (following test.py logic)
       this.log('[DEBUG] Step 13: Inputting description for AI image');
@@ -1794,7 +2271,7 @@ export class PlaywrightService {
         await saveButton.hover();
         await this.authenticatedPage.waitForTimeout(BUTTON_ACTIVATION_DELAY_MS);
         await saveButton.click();
-        await this.waitForUiSettled(this.authenticatedPage, 1000);
+        await this.waitForUiSettled(this.authenticatedPage, 250);
 
         this.log('[DEBUG] Draft saved successfully');
         vscode.window.showInformationMessage('Draft saved successfully in Chrome');
