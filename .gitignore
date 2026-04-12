@@ -5,7 +5,7 @@ node_modules/
 out/
 
 # VSIX
-*.vsix
+# *.vsix
 
 # VSCode
 .vscode/
