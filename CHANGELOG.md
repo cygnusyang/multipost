@@ -1,5 +1,13 @@
 # Change Log
 
+## 1.2.0 (2026-04-12)
+
+- 🎨 **Refactor**: Standardize command titles with MultiPost prefix for consistency
+- 🔧 **Update**: Rename all command titles to use 'MultiPost:' prefix
+- 📝 **Update**: Update documentation files to reflect new command names
+- 🚀 **Feature**: Add GitHub Actions workflow for automated releases
+- 🔧 **Improve**: Extract version-specific changelog for GitHub releases
+
 ## 1.0.0 (2026-04-11)
 
 - 🎉 **Major Release**: Persistent login state with Playwright user data directory
