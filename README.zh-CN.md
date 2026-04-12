@@ -36,7 +36,7 @@
 
 1. 打开 `.md` Markdown 文件
 2. 打开命令面板（`Cmd+Shift+P` / `Ctrl+Shift+P`）
-3. 输入 `CDP Fully Automated Upload` 执行
+3. 输入 `MultiPost: Publish Current Markdown to WeChat` 执行
 4. **未登录时**：会自动打开 Chrome，扫码登录后自动保存凭据并上传
 5. **已登录时**：直接在浏览器中创建草稿
 6. Mermaid 图表会自动渲染为图片并上传到微信 CDN
@@ -44,17 +44,17 @@
 ### 方式二：手动 Cookie 模式
 
 1. **Input Cookie (Manual Login)** - 手动输入从浏览器复制的 Cookie
-2. **Upload to WeChat Official Accounts** - 上传当前 Markdown 到微信公众号草稿
+2. **MultiPost: Publish Current Markdown to WeChat** - 上传当前 Markdown 到微信公众号草稿
 
 ### 其他命令
 
-- **Preview MultiPost Format** - 在侧边栏预览转换后的微信 HTML 格式
-- **Logout MultiPost** - 清除保存的登录凭据
+- **MultiPost: Preview WeChat Article Layout** - 在侧边栏预览转换后的微信 HTML 格式
+- **MultiPost: Sign Out of WeChat Session** - 清除保存的登录凭据
 
 ### 预览微信格式
 
 1. 打开一个 `.md` Markdown 文件
-2. 打开命令面板，输入 `Preview MultiPost Format`
+2. 打开命令面板，输入 `MultiPost: Preview WeChat Article Layout`
 3. 会在侧边打开预览窗口，显示微信公众号格式的预览
 
 ## ⚙️ 配置

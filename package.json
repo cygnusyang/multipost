@@ -101,7 +101,7 @@
     "commands": [
       {
         "command": "multipost.uploadToWeChat",
-        "title": "Upload to WeChat Official Accounts (Playwright)",
+        "title": "MultiPost: Publish Current Markdown to WeChat",
         "icon": {
           "light": "media/icons/upload-light.svg",
           "dark": "media/icons/upload-dark.svg"
@@ -109,15 +109,15 @@
       },
       {
         "command": "multipost.logoutWeChat",
-        "title": "Logout MultiPost"
+        "title": "MultiPost: Sign Out of WeChat Session"
       },
       {
         "command": "multipost.configurePublishOptions",
-        "title": "Configure MultiPost Publish Options"
+        "title": "MultiPost: Configure Publishing Options"
       },
       {
         "command": "multipost.preview",
-        "title": "Preview MultiPost Format"
+        "title": "MultiPost: Preview WeChat Article Layout"
       }
     ]
   },
