@@ -11,6 +11,8 @@ const POLL_INTERVAL_MS = 1000; // Check every 1 second for login completion
 const BUTTON_ACTIVATION_DELAY_MS = 120; // Delay for button activation after hover
 const INTERACTION_TIMEOUT_MS = 2000; // Timeout for best-effort page settle
 const DIALOG_TIMEOUT_MS = 30000;
+const DRAFT_CREATION_ENTRY_TIMEOUT_MS = 8000;
+const ARTICLE_EDITOR_POPUP_TIMEOUT_MS = 10000;
 const DIALOG_CLOSE_TIMEOUT_MS = 10000; // Shorter timeout for dialog close operations
 const UI_SETTLE_MS = 120;
 const PROCESS_SINGLETON_RECOVERY_DELAY_MS = 400;
@@ -1451,9 +1453,9 @@ export class PlaywrightService {
 
     try {
       await this.authenticatedPage.evaluate((renderedHtml) => {
-        const candidates = Array.from(document.querySelectorAll('[contenteditable="true"]')) as HTMLElement[];
-        const visibleCandidates = candidates.filter((el) => el.offsetParent !== null);
-        const editor = visibleCandidates[0];
+        const editor = Array.from(document.querySelectorAll('[contenteditable="true"]'))
+          .filter((el): el is HTMLElement => el instanceof HTMLElement && el.offsetParent !== null)
+          .find((el) => (el.innerText || '').trim().includes('从这里开始写正文'));
 
         if (!editor) {
           throw new Error('Editable content area not found.');
@@ -1554,6 +1556,77 @@ export class PlaywrightService {
     await target.waitFor({ state: 'visible', timeout: timeoutMs });
     await target.click();
     await this.maybeWaitForNavigation(page);
+  }
+
+  private async clickNewDraftCreationEntry(page: Page): Promise<void> {
+    const creationEntryCandidates: Array<{ name: string; locator: Locator }> = [
+      { name: 'button[新的创作]', locator: page.getByRole('button', { name: '新的创作', exact: true }) },
+      { name: 'link[新的创作]', locator: page.getByRole('link', { name: '新的创作', exact: true }) },
+      { name: 'text[新的创作]', locator: page.getByText('新的创作', { exact: true }) },
+      { name: 'legacy add icon', locator: page.locator('.weui-desktop-card__icon-add') },
+    ];
+
+    let lastError: unknown;
+    for (const candidate of creationEntryCandidates) {
+      const count = await candidate.locator.count().catch(() => 0);
+      if (count === 0) {
+        continue;
+      }
+
+      try {
+        this.log(`[DEBUG] Clicking draft creation entry via ${candidate.name}`);
+        await this.clickAndStabilize(candidate.locator, page, DRAFT_CREATION_ENTRY_TIMEOUT_MS);
+        return;
+      } catch (error) {
+        lastError = error;
+        this.log(`[DEBUG] Draft creation entry ${candidate.name} failed: ${error}`, 'warn');
+      }
+    }
+
+    throw new Error(`Unable to find or click draft creation entry "新的创作". Last error: ${lastError}`);
+  }
+
+  private async clickArticleCreationType(page: Page): Promise<void> {
+    const articleTypeCandidates: Array<{ name: string; locator: Locator }> = [
+      { name: 'button[文章]', locator: page.getByRole('button', { name: '文章', exact: true }) },
+      { name: 'link[文章]', locator: page.getByRole('link', { name: '文章', exact: true }) },
+      { name: 'text[文章]', locator: page.getByText('文章', { exact: true }) },
+    ];
+
+    let lastError: unknown;
+    for (const candidate of articleTypeCandidates) {
+      const count = await candidate.locator.count().catch(() => 0);
+      if (count === 0) {
+        continue;
+      }
+
+      try {
+        this.log(`[DEBUG] Selecting creation type via ${candidate.name}`);
+        await this.clickAndStabilize(candidate.locator, page, DRAFT_CREATION_ENTRY_TIMEOUT_MS);
+        return;
+      } catch (error) {
+        lastError = error;
+        this.log(`[DEBUG] Creation type ${candidate.name} failed: ${error}`, 'warn');
+      }
+    }
+
+    throw new Error(`Unable to select creation type "文章". Last error: ${lastError}`);
+  }
+
+  private async selectArticleCreationTypeAndResolveEditorPage(page: Page): Promise<Page> {
+    const popupPromise = page.waitForEvent('popup', { timeout: ARTICLE_EDITOR_POPUP_TIMEOUT_MS });
+
+    await this.clickArticleCreationType(page);
+
+    try {
+      const editorPage = await popupPromise;
+      await editorPage.waitForLoadState('domcontentloaded', { timeout: DIALOG_TIMEOUT_MS });
+      this.log('[DEBUG] Article editor opened in a new tab after selecting "文章"');
+      return editorPage;
+    } catch (error) {
+      this.log(`[DEBUG] No new tab detected after selecting "文章"; using current page: ${error}`, 'warn');
+      return page;
+    }
   }
 
   private async clickAiCoverEntry(timeoutMs: number = DIALOG_TIMEOUT_MS): Promise<void> {
@@ -1967,53 +2040,41 @@ export class PlaywrightService {
         throw new Error('Current browser session is not logged in. Please complete QR login first.');
       }
 
-      // Step 2: Navigate through interface (strictly following test.py logic)
-      // 内容管理 → 草稿箱 → 新的创作 → 写新文章
+      // Step 2: Navigate through interface
+      // 内容管理 → 草稿箱 → 新的创作 → 文章
       this.log('[DEBUG] Step 2: Clicking "内容管理"');
       await this.clickAndStabilize(page.getByText('内容管理'), page);
 
       this.log('[DEBUG] Step 3: Clicking "草稿箱"');
       await this.clickAndStabilize(page.getByRole('link', { name: '草稿箱' }), page);
 
-      this.log('[DEBUG] Step 4: Clicking add button');
-      await this.clickAndStabilize(page.locator('.weui-desktop-card__icon-add'), page);
+      this.log('[DEBUG] Step 4: Clicking "新的创作"');
+      await this.clickNewDraftCreationEntry(page);
 
-      this.log('[DEBUG] Step 5: Clicking "写新文章" and waiting for popup');
-      let page1: Page;
-      const popupPromise = page.waitForEvent('popup', { timeout: 60000 });
-      await page.getByRole('link', { name: '写新文章' }).click();
-      try {
-        page1 = await popupPromise;
-      } catch (error) {
-        // 如果没有弹出新窗口，可能是在当前窗口跳转
-        this.log('[DEBUG] No popup detected, using current page');
-        page1 = page;
-      }
+      this.log('[DEBUG] Step 5: Selecting "文章"');
+      const editorPage = await this.selectArticleCreationTypeAndResolveEditorPage(page);
 
-      if (page1 && page1 !== page) {
-        this.log('[DEBUG] New page opened for article editing');
-        await page1.waitForLoadState('domcontentloaded', { timeout: 60000 });
-        this.setAuthenticatedPage(page1); // 更新为新页面
-      }
+      this.log('[DEBUG] Step 6: Article editor opened after selecting "文章"');
+      this.setAuthenticatedPage(editorPage);
 
-      // Step 6: Fill title (following test.py logic)
-      this.log('[DEBUG] Step 6: Filling title');
+      // Step 7: Fill title (following test.py logic)
+      this.log('[DEBUG] Step 7: Filling title');
       const titleSelector = this.authenticatedPage.getByRole('textbox', { name: '请在这里输入标题' });
       await titleSelector.waitFor({ timeout: 60000 });
       await titleSelector.click();
       await titleSelector.fill(title);
       this.log(`[DEBUG] Title filled: "${title}"`);
 
-      // Step 7: Fill author (following test.py logic)
-      this.log('[DEBUG] Step 7: Filling author');
+      // Step 8: Fill author (following test.py logic)
+      this.log('[DEBUG] Step 8: Filling author');
       const authorSelector = this.authenticatedPage.getByRole('textbox', { name: '请输入作者' });
       await authorSelector.waitFor({ timeout: 60000 });
       await authorSelector.click();
       await authorSelector.fill(author);
       this.log(`[DEBUG] Author filled: "${author}"`);
 
-      // Step 8: Fill content (following test.py logic)
-      this.log('[DEBUG] Step 8: Filling formatted content from markdown');
+      // Step 9: Fill content (following test.py logic)
+      this.log('[DEBUG] Step 9: Filling formatted content from markdown');
       const bodyContent = this.stripLeadingTopLevelHeading(content);
       if (bodyContent !== content) {
         this.log('[DEBUG] Removed leading H1 from body markdown before upload');
@@ -2021,8 +2082,8 @@ export class PlaywrightService {
       await this.fillBodyWithFormattedMarkdown(bodyContent, contentStyle);
       this.log(`[DEBUG] Formatted content filled, body markdown length: ${bodyContent.length}`);
 
-      // Step 9: Click article settings (following test.py logic)
-      this.log('[DEBUG] Step 9: Clicking "文章设置"');
+      // Step 10: Click article settings (following test.py logic)
+      this.log('[DEBUG] Step 10: Clicking "文章设置"');
       await this.clickAndStabilize(
         this.authenticatedPage.locator('#bot_bar_left_container').getByText('文章设置'),
         this.authenticatedPage

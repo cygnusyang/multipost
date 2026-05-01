@@ -1,5 +1,14 @@
 # Change Log
 
+## 1.3.0 (2026-05-01)
+
+- 🐛 **Fix**: Improved article editor detection - now finds editor by matching "从这里开始写正文" text instead of using first visible contenteditable element
+- 🐛 **Fix**: Enhanced draft creation flow - added robust fallback mechanism for clicking "新的创作" entry with multiple selector strategies
+- 🐛 **Fix**: Improved article type selection - added fallback mechanisms for selecting "文章" from creation popup
+- 🔧 **Improve**: Better popup handling - properly detect and wait for article editor popup window with fallback to current page
+- 🔧 **Improve**: Added timeout constants for draft creation entry (8000ms) and article editor popup (10000ms)
+- 🧪 **Test**: Added comprehensive unit tests for new draft creation and article type selection methods
+
 ## 1.2.0 (2026-04-12)
 
 - 🎨 **Refactor**: Standardize command titles with MultiPost prefix for consistency

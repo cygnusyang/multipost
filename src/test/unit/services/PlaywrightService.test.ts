@@ -110,6 +110,131 @@ describe('PlaywrightService', () => {
     }
   });
 
+  it('clicks the new draft creation button before legacy add icon', async () => {
+    const service = new PlaywrightService({
+      appendLine: jest.fn(),
+      show: jest.fn(),
+      dispose: jest.fn(),
+      name: 'test',
+    } as any);
+
+    const newCreationButton = { count: jest.fn().mockResolvedValue(1) };
+    const legacyAddIcon = { count: jest.fn().mockResolvedValue(1) };
+    const absentLocator = { count: jest.fn().mockResolvedValue(0) };
+    const page = {
+      getByRole: jest.fn((role: string, options: { name: string }) => {
+        if (role === 'button' && options.name === '新的创作') {
+          return newCreationButton;
+        }
+        return absentLocator;
+      }),
+      getByText: jest.fn(() => absentLocator),
+      locator: jest.fn(() => legacyAddIcon),
+    };
+    const clickAndStabilize = jest
+      .spyOn(service as any, 'clickAndStabilize')
+      .mockResolvedValue(undefined);
+
+    await (service as any).clickNewDraftCreationEntry(page);
+
+    expect(clickAndStabilize).toHaveBeenCalledWith(newCreationButton, page, 8000);
+    expect(legacyAddIcon.count).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the legacy draft add icon when the new creation entry is unavailable', async () => {
+    const service = new PlaywrightService({
+      appendLine: jest.fn(),
+      show: jest.fn(),
+      dispose: jest.fn(),
+      name: 'test',
+    } as any);
+
+    const absentLocator = { count: jest.fn().mockResolvedValue(0) };
+    const legacyAddIcon = { count: jest.fn().mockResolvedValue(1) };
+    const page = {
+      getByRole: jest.fn(() => absentLocator),
+      getByText: jest.fn(() => absentLocator),
+      locator: jest.fn(() => legacyAddIcon),
+    };
+    const clickAndStabilize = jest
+      .spyOn(service as any, 'clickAndStabilize')
+      .mockResolvedValue(undefined);
+
+    await (service as any).clickNewDraftCreationEntry(page);
+
+    expect(clickAndStabilize).toHaveBeenCalledWith(legacyAddIcon, page, 8000);
+  });
+
+  it('selects article from the new creation type popup', async () => {
+    const service = new PlaywrightService({
+      appendLine: jest.fn(),
+      show: jest.fn(),
+      dispose: jest.fn(),
+      name: 'test',
+    } as any);
+
+    const articleButton = { count: jest.fn().mockResolvedValue(1) };
+    const absentLocator = { count: jest.fn().mockResolvedValue(0) };
+    const page = {
+      getByRole: jest.fn((role: string, options: { name: string }) => {
+        if (role === 'button' && options.name === '文章') {
+          return articleButton;
+        }
+        return absentLocator;
+      }),
+      getByText: jest.fn(() => absentLocator),
+    };
+    const clickAndStabilize = jest
+      .spyOn(service as any, 'clickAndStabilize')
+      .mockResolvedValue(undefined);
+
+    await (service as any).clickArticleCreationType(page);
+
+    expect(clickAndStabilize).toHaveBeenCalledWith(articleButton, page, 8000);
+  });
+
+  it('uses the popup tab as the article editor page after selecting article', async () => {
+    const service = new PlaywrightService({
+      appendLine: jest.fn(),
+      show: jest.fn(),
+      dispose: jest.fn(),
+      name: 'test',
+    } as any);
+
+    const editorPage = {
+      waitForLoadState: jest.fn().mockResolvedValue(undefined),
+    };
+    const page = {
+      waitForEvent: jest.fn().mockResolvedValue(editorPage),
+    };
+    jest.spyOn(service as any, 'clickArticleCreationType').mockResolvedValue(undefined);
+
+    const result = await (service as any).selectArticleCreationTypeAndResolveEditorPage(page);
+
+    expect(result).toBe(editorPage);
+    expect(page.waitForEvent).toHaveBeenCalledWith('popup', { timeout: 10000 });
+    expect((service as any).clickArticleCreationType).toHaveBeenCalledWith(page);
+    expect(editorPage.waitForLoadState).toHaveBeenCalledWith('domcontentloaded', { timeout: 30000 });
+  });
+
+  it('falls back to the current page when selecting article does not open a popup tab', async () => {
+    const service = new PlaywrightService({
+      appendLine: jest.fn(),
+      show: jest.fn(),
+      dispose: jest.fn(),
+      name: 'test',
+    } as any);
+
+    const page = {
+      waitForEvent: jest.fn().mockRejectedValue(new Error('no popup')),
+    };
+    jest.spyOn(service as any, 'clickArticleCreationType').mockResolvedValue(undefined);
+
+    const result = await (service as any).selectArticleCreationTypeAndResolveEditorPage(page);
+
+    expect(result).toBe(page);
+  });
+
   it('loads mermaid runtime through local-source eval injection', async () => {
     const service = new PlaywrightService({
       appendLine: jest.fn(),
