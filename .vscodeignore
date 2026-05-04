@@ -1,31 +1,46 @@
-# Node dependencies - vsce will automatically exclude devDependencies
-node_modules/
+# Node dependencies - IMPORTANT: Keep this line commented out!
+# We need node_modules in the package, vsce automatically excludes devDependencies
+# node_modules/
 
-# TypeScript source files - we only need the compiled output
-src/**
-!out/**
-out/**/*.js.map
+# Development tools
+.kilo/**
+.claude/**
+
+# TypeScript build cache
 tsconfig.tsbuildinfo
 
 # Test files and results
-src/test/**
+checkWeChatLoggedInPage.js
+checkWeChatPageStructure.ts
+playwright-wechat.py
+test-markdown.js
 test-results/**
-coverage/**
 playwright-profile/**
 
-# Development tools and configs
-.kilo/**
-.claude/**
+# Source files
+src/**
+!out/**
+out/**/*.js.map
+
+# VSIX
+*.vsix
+
+# Version control and CI
+.git/**
 .github/**
+.gitignore
+
+# IDE
 .vscode/**
 !.vscode/extensions.json
-.git/**
-.gitignore
+.idea/**
+
+# Testing and coverage
+src/test/**
+coverage/**
+jest.config.js
 tsconfig.json
 tsconfig.test.json
-jest.config.js
-.eslintrc*
-.prettierrc*
 
 # Documentation
 docs/**
@@ -33,19 +48,13 @@ TESTING.md
 INSTALL.md
 CHANGELOG.md
 
-# Temporary files
-*.vsix
+# Build and temporary files
 *.log
 .DS_Store
 Thumbs.db
 .env
 .env.local
 *.local
-
-# Temporary development files
-checkWeChatLoggedInPage.js
-checkWeChatPageStructure.ts
-playwright-wechat.py
-test-markdown.js
 image/
 scripts/
+
