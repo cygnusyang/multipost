@@ -39,7 +39,7 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           echo "Extracting changelog for version $VERSION"
-          
+
           # Extract changelog content for the version
           CHANGELOG=$(awk -v version="$VERSION" '
             BEGIN { found=0; content="" }
@@ -56,11 +56,12 @@ jobs:
             }
             END { print content }
           ' CHANGELOG.md)
-          
+
           # Save to file for later use
           echo "$CHANGELOG" > changelog.txt
-          
-          # Set output
+
+          # Set outputs
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "content<<EOF" >> $GITHUB_OUTPUT
           echo "$CHANGELOG" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
